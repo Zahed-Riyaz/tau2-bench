@@ -375,7 +375,7 @@ def run_tasks(
             _save(simulation)
         except Exception as e:
             logger.error(f"Error running task {task.id}, trial {trial}: {e}")
-            raise e
+            return None
         return simulation
 
     args = []
@@ -393,7 +393,7 @@ def run_tasks(
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
         res = list(executor.map(_run, *zip(*args)))
-        simulation_results.simulations.extend(res)
+        simulation_results.simulations.extend(r for r in res if r is not None)
     ConsoleDisplay.console.print(
         "\n✨ [bold green]Successfully completed all simulations![/bold green]\n"
         "To review the simulations, run: [bold blue]tau2 view[/bold blue]"

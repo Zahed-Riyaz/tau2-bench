@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from typing import Any, Optional
 
 import litellm
@@ -38,6 +39,7 @@ if USE_LANGFUSE:
     litellm.failure_callback = ["langfuse"]
 
 litellm.drop_params = True
+litellm.suppress_debug_info = True
 
 if LLM_CACHE_ENABLED:
     if DEFAULT_LLM_CACHE_TYPE == "redis":
@@ -95,7 +97,11 @@ def get_response_cost(response: ModelResponse) -> float:
     try:
         cost = completion_cost(completion_response=response)
     except Exception as e:
-        logger.error(e)
+        msg = str(e)
+        if "LLM Provider NOT provided" in msg or "not found in completion cost" in msg:
+            logger.debug(f"Cost unavailable for model {response.model}: {msg}")
+        else:
+            logger.error(e)
         return 0.0
     return cost
 
@@ -205,6 +211,7 @@ def generate(
     tools = [tool.openai_schema for tool in tools] if tools else None
     if tools and tool_choice is None:
         tool_choice = "auto"
+    time.sleep(1)
     try:
         response = completion(
             model=model,
