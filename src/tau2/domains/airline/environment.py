@@ -6,6 +6,7 @@ from tau2.data_model.tasks import Task
 from tau2.domains.airline.data_model import FlightDB
 from tau2.domains.airline.tools import AirlineTools
 from tau2.domains.airline.utils import (
+    AIRLINE_DATA_DIR,
     AIRLINE_DB_PATH,
     AIRLINE_POLICY_PATH,
     AIRLINE_TASK_SET_PATH,
@@ -51,3 +52,25 @@ def get_tasks_split() -> dict[str, list[str]]:
         / f"split_{Path(AIRLINE_TASK_SET_PATH).stem}.json"
     )
     return load_file(split_file)
+
+
+_MULTISTEP_TASK_SET_PATH = AIRLINE_DATA_DIR / "tasks_multistep.json"
+_MULTISTEP_SPLIT_PATH = AIRLINE_DATA_DIR / "split_tasks_multistep.json"
+
+
+def get_tasks_multistep(task_split_name: Optional[str] = "base") -> list[Task]:
+    tasks = load_file(_MULTISTEP_TASK_SET_PATH)
+    tasks = [Task.model_validate(task) for task in tasks]
+    if task_split_name is None:
+        return tasks
+    task_splits = get_tasks_multistep_split()
+    if task_split_name not in task_splits:
+        raise ValueError(
+            f"Invalid task split name: {task_split_name}. "
+            f"Valid splits are: {list(task_splits.keys())}"
+        )
+    return [task for task in tasks if task.id in task_splits[task_split_name]]
+
+
+def get_tasks_multistep_split() -> dict[str, list[str]]:
+    return load_file(_MULTISTEP_SPLIT_PATH)

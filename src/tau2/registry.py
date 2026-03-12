@@ -12,6 +12,12 @@ from tau2.domains.airline.environment import (
 )
 from tau2.domains.airline.environment import get_tasks as airline_domain_get_tasks
 from tau2.domains.airline.environment import (
+    get_tasks_multistep as airline_domain_get_tasks_multistep,
+)
+from tau2.domains.airline.environment import (
+    get_tasks_multistep_split as airline_domain_get_tasks_multistep_split,
+)
+from tau2.domains.airline.environment import (
     get_tasks_split as airline_domain_get_tasks_split,
 )
 from tau2.domains.mock.environment import get_environment as mock_domain_get_environment
@@ -218,6 +224,11 @@ try:
         airline_domain_get_tasks,
         "airline",
         get_task_splits=airline_domain_get_tasks_split,
+    )
+    registry.register_tasks(
+        airline_domain_get_tasks_multistep,
+        "airline_multistep",
+        get_task_splits=airline_domain_get_tasks_multistep_split,
     )
 
     registry.register_domain(retail_domain_get_environment, "retail")

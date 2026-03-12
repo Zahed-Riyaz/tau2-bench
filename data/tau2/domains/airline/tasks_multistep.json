@@ -1,0 +1,1145 @@
+[
+  {
+    "id": "ms_a_0",
+    "description": {
+      "purpose": "3-step dependency chain: user_id \u2192 reservation_id \u2192 flight_number \u2192 status. Agent must discover reservation and flight via tool calls, not user context.",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "I'd like to know the status of the flight on my most recent reservation.",
+        "known_info": "You are Mia Li. Your user id is mia_li_3668.",
+        "unknown_info": "You do not know your reservation ID or flight number. Do not provide them \u2014 let the agent look them up.",
+        "task_instructions": "Ask the agent for the flight status on your most recent reservation. Do not volunteer your reservation ID or flight number. If the agent asks for your reservation ID, say you don't have it handy and ask them to look it up from your account."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_a_0_0",
+          "requestor": "assistant",
+          "name": "get_user_details",
+          "arguments": {
+            "user_id": "mia_li_3668"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_a_0_1",
+          "requestor": "assistant",
+          "name": "get_reservation_details",
+          "arguments": {
+            "reservation_id": "HKEG34"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_a_0_2",
+          "requestor": "assistant",
+          "name": "get_flight_status",
+          "arguments": {
+            "flight_number": "HAT290",
+            "date": "2024-05-27"
+          },
+          "info": null,
+          "compare_args": null
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [
+        "available"
+      ],
+      "nl_assertions": [
+        "Agent correctly reports the flight status as 'available'.",
+        "Agent must look up the reservation from the user account, not ask the user for the reservation ID."
+      ],
+      "reward_basis": [
+        "ACTION",
+        "COMMUNICATE"
+      ]
+    }
+  },
+  {
+    "id": "ms_a_1",
+    "description": {
+      "purpose": "3-step dependency chain: user_id \u2192 reservation_id \u2192 flight_number \u2192 status. Agent must discover reservation and flight via tool calls, not user context.",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "I'd like to know the status of the flight on my most recent reservation.",
+        "known_info": "You are Mei Hernandez. Your user id is mei_hernandez_8984.",
+        "unknown_info": "You do not know your reservation ID or flight number. Do not provide them \u2014 let the agent look them up.",
+        "task_instructions": "Ask the agent for the flight status on your most recent reservation. Do not volunteer your reservation ID or flight number. If the agent asks for your reservation ID, say you don't have it handy and ask them to look it up from your account."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_a_1_0",
+          "requestor": "assistant",
+          "name": "get_user_details",
+          "arguments": {
+            "user_id": "mei_hernandez_8984"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_a_1_1",
+          "requestor": "assistant",
+          "name": "get_reservation_details",
+          "arguments": {
+            "reservation_id": "1AKIA8"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_a_1_2",
+          "requestor": "assistant",
+          "name": "get_flight_status",
+          "arguments": {
+            "flight_number": "HAT070",
+            "date": "2024-05-22"
+          },
+          "info": null,
+          "compare_args": null
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [
+        "available"
+      ],
+      "nl_assertions": [
+        "Agent correctly reports the flight status as 'available'.",
+        "Agent must look up the reservation from the user account, not ask the user for the reservation ID."
+      ],
+      "reward_basis": [
+        "ACTION",
+        "COMMUNICATE"
+      ]
+    }
+  },
+  {
+    "id": "ms_a_2",
+    "description": {
+      "purpose": "3-step dependency chain: user_id \u2192 reservation_id \u2192 flight_number \u2192 status. Agent must discover reservation and flight via tool calls, not user context.",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "I'd like to know the status of the flight on my most recent reservation.",
+        "known_info": "You are Aarav Nguyen. Your user id is aarav_nguyen_1055.",
+        "unknown_info": "You do not know your reservation ID or flight number. Do not provide them \u2014 let the agent look them up.",
+        "task_instructions": "Ask the agent for the flight status on your most recent reservation. Do not volunteer your reservation ID or flight number. If the agent asks for your reservation ID, say you don't have it handy and ask them to look it up from your account."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_a_2_0",
+          "requestor": "assistant",
+          "name": "get_user_details",
+          "arguments": {
+            "user_id": "aarav_nguyen_1055"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_a_2_1",
+          "requestor": "assistant",
+          "name": "get_reservation_details",
+          "arguments": {
+            "reservation_id": "H0S6OC"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_a_2_2",
+          "requestor": "assistant",
+          "name": "get_flight_status",
+          "arguments": {
+            "flight_number": "HAT147",
+            "date": "2024-05-25"
+          },
+          "info": null,
+          "compare_args": null
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [
+        "available"
+      ],
+      "nl_assertions": [
+        "Agent correctly reports the flight status as 'available'.",
+        "Agent must look up the reservation from the user account, not ask the user for the reservation ID."
+      ],
+      "reward_basis": [
+        "ACTION",
+        "COMMUNICATE"
+      ]
+    }
+  },
+  {
+    "id": "ms_b_0",
+    "description": {
+      "purpose": "4-step dependency chain: user_id \u2192 reservation_id \u2192 flight_number \u2192 send_certificate(100). Flight is cancelled; compensation = $100 \u00d7 1 passenger(s).",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "My most recent flight was disrupted and I would like compensation.",
+        "known_info": "You are Isabella Garcia. Your user id is isabella_garcia_4633.",
+        "unknown_info": "You do not know your reservation ID or flight number. Do not provide them \u2014 let the agent look them up.",
+        "task_instructions": "Tell the agent your most recent flight was disrupted and you want compensation. Do not volunteer your reservation ID or flight number. If the agent asks, say you don't have it on hand. Accept the compensation certificate once the agent offers it."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_b_0_0",
+          "requestor": "assistant",
+          "name": "get_user_details",
+          "arguments": {
+            "user_id": "isabella_garcia_4633"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_b_0_1",
+          "requestor": "assistant",
+          "name": "get_reservation_details",
+          "arguments": {
+            "reservation_id": "MHH4XU"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_b_0_2",
+          "requestor": "assistant",
+          "name": "get_flight_status",
+          "arguments": {
+            "flight_number": "HAT052",
+            "date": "2024-05-05"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_b_0_3",
+          "requestor": "assistant",
+          "name": "send_certificate",
+          "arguments": {
+            "user_id": "isabella_garcia_4633",
+            "amount": 100
+          },
+          "info": null,
+          "compare_args": null
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [],
+      "nl_assertions": [
+        "Agent verifies the flight status is 'cancelled' via tool call.",
+        "Agent issues a certificate of $100 ($100 \u00d7 1 passenger(s)).",
+        "Agent must not issue compensation without first verifying the flight status."
+      ],
+      "reward_basis": [
+        "ACTION"
+      ]
+    }
+  },
+  {
+    "id": "ms_b_1",
+    "description": {
+      "purpose": "4-step dependency chain: user_id \u2192 reservation_id \u2192 flight_number \u2192 send_certificate(100). Flight is cancelled; compensation = $100 \u00d7 1 passenger(s).",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "My most recent flight was disrupted and I would like compensation.",
+        "known_info": "You are Amelia Ito. Your user id is amelia_ito_8544.",
+        "unknown_info": "You do not know your reservation ID or flight number. Do not provide them \u2014 let the agent look them up.",
+        "task_instructions": "Tell the agent your most recent flight was disrupted and you want compensation. Do not volunteer your reservation ID or flight number. If the agent asks, say you don't have it on hand. Accept the compensation certificate once the agent offers it."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_b_1_0",
+          "requestor": "assistant",
+          "name": "get_user_details",
+          "arguments": {
+            "user_id": "amelia_ito_8544"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_b_1_1",
+          "requestor": "assistant",
+          "name": "get_reservation_details",
+          "arguments": {
+            "reservation_id": "EP5RQO"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_b_1_2",
+          "requestor": "assistant",
+          "name": "get_flight_status",
+          "arguments": {
+            "flight_number": "HAT232",
+            "date": "2024-05-12"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_b_1_3",
+          "requestor": "assistant",
+          "name": "send_certificate",
+          "arguments": {
+            "user_id": "amelia_ito_8544",
+            "amount": 100
+          },
+          "info": null,
+          "compare_args": null
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [],
+      "nl_assertions": [
+        "Agent verifies the flight status is 'cancelled' via tool call.",
+        "Agent issues a certificate of $100 ($100 \u00d7 1 passenger(s)).",
+        "Agent must not issue compensation without first verifying the flight status."
+      ],
+      "reward_basis": [
+        "ACTION"
+      ]
+    }
+  },
+  {
+    "id": "ms_b_2",
+    "description": {
+      "purpose": "4-step dependency chain: user_id \u2192 reservation_id \u2192 flight_number \u2192 send_certificate(100). Flight is delayed; compensation = $50 \u00d7 2 passenger(s).",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "My most recent flight was disrupted and I would like compensation.",
+        "known_info": "You are Noah Garcia. Your user id is noah_garcia_4365.",
+        "unknown_info": "You do not know your reservation ID or flight number. Do not provide them \u2014 let the agent look them up.",
+        "task_instructions": "Tell the agent your most recent flight was disrupted and you want compensation. Do not volunteer your reservation ID or flight number. If the agent asks, say you don't have it on hand. Accept the compensation certificate once the agent offers it."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_b_2_0",
+          "requestor": "assistant",
+          "name": "get_user_details",
+          "arguments": {
+            "user_id": "noah_garcia_4365"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_b_2_1",
+          "requestor": "assistant",
+          "name": "get_reservation_details",
+          "arguments": {
+            "reservation_id": "SCVMEC"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_b_2_2",
+          "requestor": "assistant",
+          "name": "get_flight_status",
+          "arguments": {
+            "flight_number": "HAT020",
+            "date": "2024-05-15"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_b_2_3",
+          "requestor": "assistant",
+          "name": "send_certificate",
+          "arguments": {
+            "user_id": "noah_garcia_4365",
+            "amount": 100
+          },
+          "info": null,
+          "compare_args": null
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [],
+      "nl_assertions": [
+        "Agent verifies the flight status is 'delayed' via tool call.",
+        "Agent issues a certificate of $100 ($50 \u00d7 2 passenger(s)).",
+        "Agent must not issue compensation without first verifying the flight status."
+      ],
+      "reward_basis": [
+        "ACTION"
+      ]
+    }
+  },
+  {
+    "id": "ms_c_0",
+    "description": {
+      "purpose": "3-step dependency chain: search_direct_flight \u2192 get_user_details \u2192 book_reservation. Flight number in book_reservation must come from search results, not fabricated. Route: PHL\u2192LGA.",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "I'd like to book the cheapest economy flight from PHL to LGA on 2024-05-16.",
+        "known_info": "You are Mia Li. Your user id is mia_li_3668. You want to fly from PHL to LGA on 2024-05-16 in economy class. You have 1 passenger: Amelia Ahmed (DOB: 1957-03-21). Pay with your credit card on file (payment id: credit_card_4421486).",
+        "unknown_info": "You do not know the flight number. The agent must search for available flights and pick the cheapest.",
+        "task_instructions": "Ask the agent to book the cheapest economy flight from PHL to LGA on 2024-05-16 for 1 passenger. Do not suggest a flight number \u2014 let the agent search. Confirm the booking once the agent presents the details."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_c_0_0",
+          "requestor": "assistant",
+          "name": "search_direct_flight",
+          "arguments": {
+            "origin": "PHL",
+            "destination": "LGA",
+            "date": "2024-05-16"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_c_0_1",
+          "requestor": "assistant",
+          "name": "get_user_details",
+          "arguments": {
+            "user_id": "mia_li_3668"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_c_0_2",
+          "requestor": "assistant",
+          "name": "book_reservation",
+          "arguments": {
+            "user_id": "mia_li_3668",
+            "origin": "PHL",
+            "destination": "LGA",
+            "flight_type": "one_way",
+            "cabin": "economy",
+            "flights": [
+              {
+                "flight_number": "HAT135",
+                "date": "2024-05-16"
+              }
+            ],
+            "passengers": [
+              {
+                "first_name": "Amelia",
+                "last_name": "Ahmed",
+                "dob": "1957-03-21"
+              }
+            ],
+            "payment_methods": [
+              {
+                "payment_id": "credit_card_4421486",
+                "amount": 107
+              }
+            ],
+            "total_baggages": 1,
+            "nonfree_baggages": 0,
+            "insurance": "no"
+          },
+          "info": null,
+          "compare_args": [
+            "flights"
+          ]
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [],
+      "nl_assertions": [
+        "Agent searches for available flights before booking.",
+        "Agent books the cheapest economy option found in the search results."
+      ],
+      "reward_basis": [
+        "ACTION"
+      ]
+    }
+  },
+  {
+    "id": "ms_c_1",
+    "description": {
+      "purpose": "3-step dependency chain: search_direct_flight \u2192 get_user_details \u2192 book_reservation. Flight number in book_reservation must come from search results, not fabricated. Route: LGA\u2192PHX.",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "I'd like to book the cheapest economy flight from LGA to PHX on 2024-05-16.",
+        "known_info": "You are Mei Hernandez. Your user id is mei_hernandez_8984. You want to fly from LGA to PHX on 2024-05-16 in economy class. You have 1 passenger: Anya Anderson (DOB: 1959-05-28). Pay with your credit card on file (payment id: credit_card_2140654).",
+        "unknown_info": "You do not know the flight number. The agent must search for available flights and pick the cheapest.",
+        "task_instructions": "Ask the agent to book the cheapest economy flight from LGA to PHX on 2024-05-16 for 1 passenger. Do not suggest a flight number \u2014 let the agent search. Confirm the booking once the agent presents the details."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_c_1_0",
+          "requestor": "assistant",
+          "name": "search_direct_flight",
+          "arguments": {
+            "origin": "LGA",
+            "destination": "PHX",
+            "date": "2024-05-16"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_c_1_1",
+          "requestor": "assistant",
+          "name": "get_user_details",
+          "arguments": {
+            "user_id": "mei_hernandez_8984"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_c_1_2",
+          "requestor": "assistant",
+          "name": "book_reservation",
+          "arguments": {
+            "user_id": "mei_hernandez_8984",
+            "origin": "LGA",
+            "destination": "PHX",
+            "flight_type": "one_way",
+            "cabin": "economy",
+            "flights": [
+              {
+                "flight_number": "HAT201",
+                "date": "2024-05-16"
+              }
+            ],
+            "passengers": [
+              {
+                "first_name": "Anya",
+                "last_name": "Anderson",
+                "dob": "1959-05-28"
+              }
+            ],
+            "payment_methods": [
+              {
+                "payment_id": "credit_card_2140654",
+                "amount": 107
+              }
+            ],
+            "total_baggages": 1,
+            "nonfree_baggages": 0,
+            "insurance": "no"
+          },
+          "info": null,
+          "compare_args": [
+            "flights"
+          ]
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [],
+      "nl_assertions": [
+        "Agent searches for available flights before booking.",
+        "Agent books the cheapest economy option found in the search results."
+      ],
+      "reward_basis": [
+        "ACTION"
+      ]
+    }
+  },
+  {
+    "id": "ms_c_2",
+    "description": {
+      "purpose": "3-step dependency chain: search_direct_flight \u2192 get_user_details \u2192 book_reservation. Flight number in book_reservation must come from search results, not fabricated. Route: LAS\u2192DEN.",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "I'd like to book the cheapest economy flight from LAS to DEN on 2024-05-16.",
+        "known_info": "You are Aarav Nguyen. Your user id is aarav_nguyen_1055. You want to fly from LAS to DEN on 2024-05-16 in economy class. You have 1 passenger: Mohamed Johnson (DOB: 1981-07-16). Pay with your credit card on file (payment id: credit_card_4319822).",
+        "unknown_info": "You do not know the flight number. The agent must search for available flights and pick the cheapest.",
+        "task_instructions": "Ask the agent to book the cheapest economy flight from LAS to DEN on 2024-05-16 for 1 passenger. Do not suggest a flight number \u2014 let the agent search. Confirm the booking once the agent presents the details."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_c_2_0",
+          "requestor": "assistant",
+          "name": "search_direct_flight",
+          "arguments": {
+            "origin": "LAS",
+            "destination": "DEN",
+            "date": "2024-05-16"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_c_2_1",
+          "requestor": "assistant",
+          "name": "get_user_details",
+          "arguments": {
+            "user_id": "aarav_nguyen_1055"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_c_2_2",
+          "requestor": "assistant",
+          "name": "book_reservation",
+          "arguments": {
+            "user_id": "aarav_nguyen_1055",
+            "origin": "LAS",
+            "destination": "DEN",
+            "flight_type": "one_way",
+            "cabin": "economy",
+            "flights": [
+              {
+                "flight_number": "HAT003",
+                "date": "2024-05-16"
+              }
+            ],
+            "passengers": [
+              {
+                "first_name": "Mohamed",
+                "last_name": "Johnson",
+                "dob": "1981-07-16"
+              }
+            ],
+            "payment_methods": [
+              {
+                "payment_id": "credit_card_4319822",
+                "amount": 169
+              }
+            ],
+            "total_baggages": 1,
+            "nonfree_baggages": 0,
+            "insurance": "no"
+          },
+          "info": null,
+          "compare_args": [
+            "flights"
+          ]
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [],
+      "nl_assertions": [
+        "Agent searches for available flights before booking.",
+        "Agent books the cheapest economy option found in the search results."
+      ],
+      "reward_basis": [
+        "ACTION"
+      ]
+    }
+  },
+  {
+    "id": "ms_d_0",
+    "description": {
+      "purpose": "3-step dependency chain: get_reservation_details \u2192 search_direct_flight \u2192 update_reservation_flights. Agent must read origin/destination/date from reservation before searching. Reservation: VAAOXJ.",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "I'd like to upgrade my reservation to business class.",
+        "known_info": "You are Lei Rossi. Your user id is lei_rossi_3206. Your reservation id is VAAOXJ. You want to upgrade to business class. Pay with your credit card on file (payment id: credit_card_1052991).",
+        "unknown_info": "You do not know the origin, destination, date, or flight number \u2014 let the agent read those from your reservation.",
+        "task_instructions": "Ask the agent to upgrade reservation VAAOXJ to business class. Do not mention origin, destination, or flight number \u2014 the agent must look those up from your reservation details. Confirm the upgrade once the agent presents the price difference."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_d_0_0",
+          "requestor": "assistant",
+          "name": "get_reservation_details",
+          "arguments": {
+            "reservation_id": "VAAOXJ"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_d_0_1",
+          "requestor": "assistant",
+          "name": "search_direct_flight",
+          "arguments": {
+            "origin": "CLT",
+            "destination": "MCO",
+            "date": "2024-05-24"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_d_0_2",
+          "requestor": "assistant",
+          "name": "update_reservation_flights",
+          "arguments": {
+            "reservation_id": "VAAOXJ",
+            "cabin": "business",
+            "flights": [
+              {
+                "flight_number": "HAT287",
+                "date": "2024-05-24"
+              }
+            ],
+            "payment_id": "credit_card_1052991"
+          },
+          "info": null,
+          "compare_args": [
+            "reservation_id",
+            "cabin",
+            "flights"
+          ]
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [],
+      "nl_assertions": [
+        "Agent reads the reservation details before searching for flights.",
+        "Agent uses the origin/destination/date from the reservation when searching.",
+        "Agent upgrades to business class on the same flight."
+      ],
+      "reward_basis": [
+        "ACTION"
+      ]
+    }
+  },
+  {
+    "id": "ms_d_1",
+    "description": {
+      "purpose": "3-step dependency chain: get_reservation_details \u2192 search_direct_flight \u2192 update_reservation_flights. Agent must read origin/destination/date from reservation before searching. Reservation: 1OWO6T.",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "I'd like to upgrade my reservation to business class.",
+        "known_info": "You are Sofia Anderson. Your user id is sofia_anderson_8718. Your reservation id is 1OWO6T. You want to upgrade to business class. Pay with your credit card on file (payment id: credit_card_7385026).",
+        "unknown_info": "You do not know the origin, destination, date, or flight number \u2014 let the agent read those from your reservation.",
+        "task_instructions": "Ask the agent to upgrade reservation 1OWO6T to business class. Do not mention origin, destination, or flight number \u2014 the agent must look those up from your reservation details. Confirm the upgrade once the agent presents the price difference."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_d_1_0",
+          "requestor": "assistant",
+          "name": "get_reservation_details",
+          "arguments": {
+            "reservation_id": "1OWO6T"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_d_1_1",
+          "requestor": "assistant",
+          "name": "search_direct_flight",
+          "arguments": {
+            "origin": "BOS",
+            "destination": "DFW",
+            "date": "2024-05-28"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_d_1_2",
+          "requestor": "assistant",
+          "name": "update_reservation_flights",
+          "arguments": {
+            "reservation_id": "1OWO6T",
+            "cabin": "business",
+            "flights": [
+              {
+                "flight_number": "HAT006",
+                "date": "2024-05-28"
+              }
+            ],
+            "payment_id": "credit_card_7385026"
+          },
+          "info": null,
+          "compare_args": [
+            "reservation_id",
+            "cabin",
+            "flights"
+          ]
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [],
+      "nl_assertions": [
+        "Agent reads the reservation details before searching for flights.",
+        "Agent uses the origin/destination/date from the reservation when searching.",
+        "Agent upgrades to business class on the same flight."
+      ],
+      "reward_basis": [
+        "ACTION"
+      ]
+    }
+  },
+  {
+    "id": "ms_d_2",
+    "description": {
+      "purpose": "3-step dependency chain: get_reservation_details \u2192 search_direct_flight \u2192 update_reservation_flights. Agent must read origin/destination/date from reservation before searching. Reservation: CDXEBS.",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "I'd like to upgrade my reservation to business class.",
+        "known_info": "You are Harper Garcia. Your user id is harper_garcia_8677. Your reservation id is CDXEBS. You want to upgrade to business class. Pay with your credit card on file (payment id: credit_card_5865555).",
+        "unknown_info": "You do not know the origin, destination, date, or flight number \u2014 let the agent read those from your reservation.",
+        "task_instructions": "Ask the agent to upgrade reservation CDXEBS to business class. Do not mention origin, destination, or flight number \u2014 the agent must look those up from your reservation details. Confirm the upgrade once the agent presents the price difference."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_d_2_0",
+          "requestor": "assistant",
+          "name": "get_reservation_details",
+          "arguments": {
+            "reservation_id": "CDXEBS"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_d_2_1",
+          "requestor": "assistant",
+          "name": "search_direct_flight",
+          "arguments": {
+            "origin": "LGA",
+            "destination": "SFO",
+            "date": "2024-05-26"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_d_2_2",
+          "requestor": "assistant",
+          "name": "update_reservation_flights",
+          "arguments": {
+            "reservation_id": "CDXEBS",
+            "cabin": "business",
+            "flights": [
+              {
+                "flight_number": "HAT114",
+                "date": "2024-05-26"
+              }
+            ],
+            "payment_id": "credit_card_5865555"
+          },
+          "info": null,
+          "compare_args": [
+            "reservation_id",
+            "cabin",
+            "flights"
+          ]
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [],
+      "nl_assertions": [
+        "Agent reads the reservation details before searching for flights.",
+        "Agent uses the origin/destination/date from the reservation when searching.",
+        "Agent upgrades to business class on the same flight."
+      ],
+      "reward_basis": [
+        "ACTION"
+      ]
+    }
+  },
+  {
+    "id": "ms_e_0",
+    "description": {
+      "purpose": "3-step dependency chain: get_user_details (membership=gold) \u2192 get_reservation_details (cabin=business, passengers=1) \u2192 update_reservation_baggages. Free bag calculation requires both membership and cabin. Cost: $0.",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "I'd like to add one more checked bag to my most recent reservation.",
+        "known_info": "You are Mia Li. Your user id is mia_li_3668. You want to add 1 checked bag to your most recent reservation. Pay with payment method credit_card_4421486 if there is a charge.",
+        "unknown_info": "You do not know your reservation ID. Do not provide it \u2014 let the agent look it up.",
+        "task_instructions": "Ask the agent to add one checked bag to your most recent reservation. Do not volunteer your reservation ID \u2014 the agent must look it up. If asked about payment, use credit_card_4421486. Confirm once the agent presents the updated baggage details."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_e_0_0",
+          "requestor": "assistant",
+          "name": "get_user_details",
+          "arguments": {
+            "user_id": "mia_li_3668"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_e_0_1",
+          "requestor": "assistant",
+          "name": "get_reservation_details",
+          "arguments": {
+            "reservation_id": "HKEG34"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_e_0_2",
+          "requestor": "assistant",
+          "name": "update_reservation_baggages",
+          "arguments": {
+            "reservation_id": "HKEG34",
+            "total_baggages": 1,
+            "nonfree_baggages": 0,
+            "payment_id": "credit_card_4421486"
+          },
+          "info": null,
+          "compare_args": null
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [],
+      "nl_assertions": [
+        "Agent checks user membership (gold) and reservation cabin (business) before calculating the cost.",
+        "Agent correctly calculates 4 free bag(s) per passenger (4 free total for 1 passenger(s)).",
+        "Agent correctly notes the bag is free."
+      ],
+      "reward_basis": [
+        "ACTION"
+      ]
+    }
+  },
+  {
+    "id": "ms_e_1",
+    "description": {
+      "purpose": "3-step dependency chain: get_user_details (membership=gold) \u2192 get_reservation_details (cabin=economy, passengers=2) \u2192 update_reservation_baggages. Free bag calculation requires both membership and cabin. Cost: $0.",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "I'd like to add one more checked bag to my most recent reservation.",
+        "known_info": "You are Mei Hernandez. Your user id is mei_hernandez_8984. You want to add 1 checked bag to your most recent reservation. Pay with payment method gift_card_5309492 if there is a charge.",
+        "unknown_info": "You do not know your reservation ID. Do not provide it \u2014 let the agent look it up.",
+        "task_instructions": "Ask the agent to add one checked bag to your most recent reservation. Do not volunteer your reservation ID \u2014 the agent must look it up. If asked about payment, use gift_card_5309492. Confirm once the agent presents the updated baggage details."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_e_1_0",
+          "requestor": "assistant",
+          "name": "get_user_details",
+          "arguments": {
+            "user_id": "mei_hernandez_8984"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_e_1_1",
+          "requestor": "assistant",
+          "name": "get_reservation_details",
+          "arguments": {
+            "reservation_id": "1AKIA8"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_e_1_2",
+          "requestor": "assistant",
+          "name": "update_reservation_baggages",
+          "arguments": {
+            "reservation_id": "1AKIA8",
+            "total_baggages": 2,
+            "nonfree_baggages": 0,
+            "payment_id": "gift_card_5309492"
+          },
+          "info": null,
+          "compare_args": null
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [],
+      "nl_assertions": [
+        "Agent checks user membership (gold) and reservation cabin (economy) before calculating the cost.",
+        "Agent correctly calculates 3 free bag(s) per passenger (6 free total for 2 passenger(s)).",
+        "Agent correctly notes the bag is free."
+      ],
+      "reward_basis": [
+        "ACTION"
+      ]
+    }
+  },
+  {
+    "id": "ms_e_2",
+    "description": {
+      "purpose": "3-step dependency chain: get_user_details (membership=silver) \u2192 get_reservation_details (cabin=business, passengers=2) \u2192 update_reservation_baggages. Free bag calculation requires both membership and cabin. Cost: $0.",
+      "relevant_policies": null,
+      "notes": null
+    },
+    "user_scenario": {
+      "persona": null,
+      "instructions": {
+        "domain": "airline",
+        "reason_for_call": "I'd like to add one more checked bag to my most recent reservation.",
+        "known_info": "You are Aarav Nguyen. Your user id is aarav_nguyen_1055. You want to add 1 checked bag to your most recent reservation. Pay with payment method credit_card_4319822 if there is a charge.",
+        "unknown_info": "You do not know your reservation ID. Do not provide it \u2014 let the agent look it up.",
+        "task_instructions": "Ask the agent to add one checked bag to your most recent reservation. Do not volunteer your reservation ID \u2014 the agent must look it up. If asked about payment, use credit_card_4319822. Confirm once the agent presents the updated baggage details."
+      }
+    },
+    "ticket": null,
+    "initial_state": null,
+    "evaluation_criteria": {
+      "actions": [
+        {
+          "action_id": "ms_e_2_0",
+          "requestor": "assistant",
+          "name": "get_user_details",
+          "arguments": {
+            "user_id": "aarav_nguyen_1055"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_e_2_1",
+          "requestor": "assistant",
+          "name": "get_reservation_details",
+          "arguments": {
+            "reservation_id": "H0S6OC"
+          },
+          "info": null,
+          "compare_args": null
+        },
+        {
+          "action_id": "ms_e_2_2",
+          "requestor": "assistant",
+          "name": "update_reservation_baggages",
+          "arguments": {
+            "reservation_id": "H0S6OC",
+            "total_baggages": 4,
+            "nonfree_baggages": 0,
+            "payment_id": "credit_card_4319822"
+          },
+          "info": null,
+          "compare_args": null
+        }
+      ],
+      "env_assertions": null,
+      "communicate_info": [],
+      "nl_assertions": [
+        "Agent checks user membership (silver) and reservation cabin (business) before calculating the cost.",
+        "Agent correctly calculates 3 free bag(s) per passenger (6 free total for 2 passenger(s)).",
+        "Agent correctly notes the bag is free."
+      ],
+      "reward_basis": [
+        "ACTION"
+      ]
+    }
+  }
+]
