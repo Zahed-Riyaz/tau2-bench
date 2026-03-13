@@ -1,5 +1,5 @@
 """
-RL fine-tuning experiment for airline_multistep using Tinker API.
+RL fine-tuning experiment for airline_multistep using HuggingFace TRL + PEFT.
 
 Targets the chain-following gaps observed in the Llama-3.3-70B baseline (2/15):
   - Agent picks wrong reservation_id at step 2   (ms_a, ms_e failures)
@@ -11,12 +11,12 @@ Pipeline
 --------
   Phase 1  Collect rollouts on the TRAIN split via tau2 run (Groq for speed).
   Phase 2  Load saved trajectories, compute REINFORCE advantages, LoRA-tune
-           the agent on Tinker using a weighted cross-entropy loss.
+           the agent locally using HuggingFace transformers + PEFT + PyTorch.
   Phase 3  Evaluate the tuned model on the TEST split and compare rewards.
 
-Quick start
+Quick start (local GPU or Google Colab T4 — free)
 -----------
-    export TINKER_API_KEY=<key>
+    pip install transformers peft accelerate torch bitsandbytes
     export GROQ_API_KEY=<key>
     python -m tau2.scripts.rl_airline_experiment
 
@@ -25,10 +25,15 @@ Skip rollout collection if you already have a simulation file:
         --skip-rollouts \\
         --trajectories-file data/tau2/simulations/<run>.json
 
-Usage after LoRA training (post-RL eval only):
+Post-RL eval only (tuned model already saved):
     python -m tau2.scripts.rl_airline_experiment \\
         --skip-rollouts --skip-train \\
-        --tuned-model tinker://<run-id>/sampler_weights/final
+        --model-output-dir ./output/tuned_model \\
+        --trajectories-file data/tau2/simulations/<run>.json
+
+Push tuned model to HuggingFace Hub for persistent storage:
+    python -m tau2.scripts.rl_airline_experiment \\
+        --push-to-hub <your-hf-username>/airline-rl-tuned
 """
 
 from __future__ import annotations
@@ -44,15 +49,20 @@ from typing import Any
 
 from loguru import logger
 
-# ── Optional dependencies ──────────────────────────────────────────────────────
+# ── Optional ML dependencies ───────────────────────────────────────────────────
 try:
-    import tinker
-    from tinker import AdamParams, Datum, EncodedTextChunk, ModelInput, SamplingParams
+    import torch
+    import torch.nn as nn
+    from peft import LoraConfig, get_peft_model
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    TINKER_OK = True
+    TRL_OK = True
 except ImportError:
-    TINKER_OK = False
-    logger.warning("tinker not installed — training phases will be skipped. pip install tinker")
+    TRL_OK = False
+    logger.warning(
+        "transformers/peft/torch not installed — training phases will be skipped.\n"
+        "Run: pip install transformers peft accelerate torch bitsandbytes"
+    )
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -63,63 +73,27 @@ SIM_DIR.mkdir(parents=True, exist_ok=True)
 DOMAIN = "airline"
 TASK_SET = "airline_multistep"
 
-# Smallest capable instruction model available on Tinker with tool-calling support.
+# Base model — small enough to fine-tune on a free Colab T4 (16 GB VRAM)
+# with 4-bit quantisation + LoRA.
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 
-# Rollout collection model.
-# Default: Groq (fast, free).  Pass --use-tinker-inference to use Tinker instead
-# (no rate limits, same session as the training client).
+# Rollout collection — Groq is fast and free.
 ROLLOUT_MODEL = "groq/llama-3.3-70b-versatile"
 USER_MODEL = "groq/llama-3.3-70b-versatile"
 
-TINKER_OAI_BASE = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
-
 # RL hyper-params
 LORA_RANK = 16
+LORA_ALPHA = 32
 ADAM_LR = 3e-4
 NUM_EPOCHS = 2
 REWARD_BASELINE = 0.5   # shift {0,1} reward → {-0.5, +0.5} advantage
-
-
-# ── Tinker inference setup ─────────────────────────────────────────────────────
-
-def create_tinker_inference_checkpoint(training_client) -> tuple[str, dict]:
-    """
-    Save the current LoRA weights as a lightweight sampler checkpoint and return:
-      (agent_llm_string, env_overrides)
-
-    The agent_llm_string is passed to tau2 via --agent-llm.
-    env_overrides patches OPENAI_API_BASE / OPENAI_API_KEY so litellm routes
-    the call to Tinker's OpenAI-compatible endpoint instead of OpenAI.
-
-    No rate limits: Tinker's inference API is billed by compute, not by RPM/TPM.
-    """
-    logger.info("Saving initial LoRA weights for Tinker inference …")
-    checkpoint_path: str = training_client.save_weights_for_sampler("rollout_init").result().path
-    logger.info(f"Tinker inference checkpoint → {checkpoint_path}")
-
-    agent_llm = f"openai/{checkpoint_path}"
-    env_overrides = {
-        "OPENAI_API_BASE": TINKER_OAI_BASE,
-        "OPENAI_API_KEY": os.environ.get("TINKER_API_KEY", ""),
-    }
-    return agent_llm, env_overrides
+MAX_SEQ_LEN = 2048      # truncate long conversations to fit in VRAM
 
 
 # ── Phase 1: Rollout collection ────────────────────────────────────────────────
 
-def collect_rollouts(
-    out_file: Path,
-    agent_llm: str = ROLLOUT_MODEL,
-    env_overrides: dict | None = None,
-) -> Path:
-    """
-    Run tau2 on the TRAIN split and save trajectories to *out_file*.
-
-    agent_llm      — the litellm model string for the agent.
-    env_overrides  — extra environment variables (e.g. to point litellm at
-                     Tinker's OpenAI endpoint instead of Groq).
-    """
+def collect_rollouts(out_file: Path, agent_llm: str = ROLLOUT_MODEL) -> Path:
+    """Run tau2 on the TRAIN split and save trajectories to *out_file*."""
     logger.info(f"Phase 1 — collecting rollouts with agent={agent_llm} …")
     cmd = [
         sys.executable, "-m", "tau2", "run",
@@ -130,9 +104,8 @@ def collect_rollouts(
         "--user-llm", USER_MODEL,
         "--save-to", str(out_file),
     ]
-    env = {**os.environ, **(env_overrides or {})}
     logger.info(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, env=env)
+    result = subprocess.run(cmd)
     if result.returncode != 0:
         logger.warning("tau2 run exited with non-zero status — some tasks may have failed.")
     logger.info(f"Trajectories saved → {out_file}")
@@ -189,7 +162,7 @@ def _encode_turn(
     Tokenise a single assistant turn.
 
     Returns:
-        context_tokens  — the prompt tokens (will get weight=0)
+        context_tokens  — the prompt tokens (will get weight=0 in training)
         response_tokens — the completion tokens (will get weight=advantage)
     """
     ctx_str = tokenizer.apply_chat_template(
@@ -208,21 +181,26 @@ def _encode_turn(
     return ctx_tokens, resp_tokens
 
 
-def build_datums(
+def build_training_tensors(
     simulation_results: list[dict],
     tokenizer,
     baseline: float = REWARD_BASELINE,
-) -> list[Datum]:
+    max_len: int = MAX_SEQ_LEN,
+) -> list[dict]:
     """
-    Convert tau2 SimulationRun dicts → Tinker Datum objects.
+    Convert tau2 SimulationRun dicts → PyTorch training tensors.
 
     Strategy (REINFORCE with constant baseline):
       advantage = reward - baseline
       Each assistant turn in the episode gets the same advantage as a
-      per-token weight.  Positive advantage → reinforce those tokens.
+      per-token weight. Positive advantage → reinforce those tokens.
       Negative advantage → suppress them.
+
+    Returns a list of dicts with keys:
+      input_ids  — LongTensor [seq_len]
+      weights    — FloatTensor [seq_len]  (0 for prompt, ±advantage for response)
     """
-    datums: list[Datum] = []
+    training_data = []
 
     for sim in simulation_results:
         reward: float = sim.get("reward", 0.0)
@@ -232,7 +210,6 @@ def build_datums(
         if not messages_raw:
             continue
 
-        # Skip episodes that are trivially uninformative (all tokens 0 weight)
         if abs(advantage) < 1e-6:
             logger.debug(f"Task {sim.get('task_id')}: advantage≈0, skipping.")
             continue
@@ -250,148 +227,206 @@ def build_datums(
             try:
                 ctx_tokens, resp_tokens = _encode_turn(tokenizer, context, msg)
             except Exception as e:
-                logger.warning(f"Tokenisation failed for task {sim.get('task_id')} turn {i}: {e}")
+                logger.warning(
+                    f"Tokenisation failed for task {sim.get('task_id')} turn {i}: {e}"
+                )
                 continue
 
             if not resp_tokens:
                 continue
 
             all_tokens = ctx_tokens + resp_tokens
-            # weights: 0 for prompt, advantage for completion
             weights = [0.0] * len(ctx_tokens) + [advantage] * len(resp_tokens)
 
-            datum = Datum(
-                model_input=ModelInput(
-                    chunks=[EncodedTextChunk(tokens=all_tokens)]
-                ),
-                loss_fn_inputs={
-                    "targets": all_tokens,
-                    "weights": weights,
-                },
-            )
-            datums.append(datum)
+            # Truncate to max_len from the right to keep recent context
+            if len(all_tokens) > max_len:
+                all_tokens = all_tokens[-max_len:]
+                weights = weights[-max_len:]
+
+            training_data.append({
+                "input_ids": torch.tensor(all_tokens, dtype=torch.long),
+                "weights": torch.tensor(weights, dtype=torch.float32),
+            })
             logger.debug(
                 f"Task {sim.get('task_id')} turn {i}: "
                 f"reward={reward:.2f} advantage={advantage:+.2f} "
-                f"resp_len={len(resp_tokens)}"
+                f"seq_len={len(all_tokens)}"
             )
 
-    logger.info(f"Built {len(datums)} training datums from {len(simulation_results)} trajectories.")
-    return datums
+    logger.info(
+        f"Built {len(training_data)} training tensors "
+        f"from {len(simulation_results)} trajectories."
+    )
+    return training_data
 
 
-def create_training_client():
-    """Create (and return) a Tinker LoRA training client for BASE_MODEL."""
-    if not TINKER_OK:
-        raise ImportError("tinker package not installed. Run: pip install tinker")
-    svc = tinker.ServiceClient()
-    client = svc.create_lora_training_client(
-        base_model=BASE_MODEL,
-        rank=LORA_RANK,
-    ).result()
-    logger.info(f"LoRA training session started — base model: {BASE_MODEL}, rank={LORA_RANK}")
-    return client
-
-
-def run_rl_training(trajectories_file: Path, training_client=None) -> str:
+def setup_model(quantize_4bit: bool = True):
     """
-    Fine-tune BASE_MODEL on the collected trajectories.
+    Load BASE_MODEL with LoRA adapters.
 
-    training_client — pass an existing client to reuse the same Tinker session
-                      (e.g. when --use-tinker-inference was used for rollouts).
-                      If None, a fresh session is created.
-
-    Returns the tinker:// path of the saved sampler checkpoint.
+    quantize_4bit=True uses bitsandbytes 4-bit quantisation — fits an 8B
+    model inside a free Colab T4's 16 GB VRAM.  Set False on machines with
+    more memory.
     """
-    if not TINKER_OK:
-        raise ImportError("tinker package not installed. Run: pip install tinker")
+    if not TRL_OK:
+        raise ImportError(
+            "transformers/peft/torch not installed.\n"
+            "Run: pip install transformers peft accelerate torch bitsandbytes"
+        )
 
-    logger.info("Phase 2 — RL fine-tuning via Tinker …")
+    logger.info(f"Loading {BASE_MODEL} …")
 
-    # Load trajectories
+    load_kwargs: dict[str, Any] = {"device_map": "auto"}
+    if quantize_4bit:
+        from transformers import BitsAndBytesConfig
+        load_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+    else:
+        load_kwargs["torch_dtype"] = torch.float16
+
+    model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, **load_kwargs)
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    lora_config = LoraConfig(
+        r=LORA_RANK,
+        lora_alpha=LORA_ALPHA,
+        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+        lora_dropout=0.05,
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+
+    logger.info(f"Model loaded with LoRA rank={LORA_RANK}, alpha={LORA_ALPHA}")
+    return model, tokenizer
+
+
+def run_rl_training(
+    trajectories_file: Path,
+    output_dir: Path,
+    push_to_hub: str | None = None,
+    quantize_4bit: bool = True,
+) -> Path:
+    """
+    REINFORCE fine-tune BASE_MODEL on the collected trajectories.
+
+    Uses:
+      - HuggingFace transformers for model loading
+      - PEFT LoRA for parameter-efficient fine-tuning
+      - PyTorch manual training loop with advantage-weighted cross-entropy
+
+    Saves the merged model to output_dir and optionally pushes to HF Hub.
+    Returns output_dir.
+    """
+    logger.info("Phase 2 — RL fine-tuning via HuggingFace TRL + PEFT …")
+
     with open(trajectories_file) as f:
         data = json.load(f)
     simulations: list[dict] = data.get("simulations", [])
-    logger.info(f"Loaded {len(simulations)} simulation runs from {trajectories_file}")
+    logger.info(f"Loaded {len(simulations)} simulation runs.")
 
-    # Reuse or create a training client
-    if training_client is None:
-        training_client = create_training_client()
+    model, tokenizer = setup_model(quantize_4bit=quantize_4bit)
+    training_data = build_training_tensors(simulations, tokenizer)
 
-    # Get tokenizer from the training client
-    tokenizer = training_client.get_tokenizer().result()
-
-    # Build Datum objects
-    datums = build_datums(simulations, tokenizer)
-    if not datums:
+    if not training_data:
         raise ValueError(
-            "No training datums were produced. "
+            "No training tensors produced. "
             "Check that trajectories_file contains valid simulation runs."
         )
 
-    # RL training loop
-    adam = AdamParams(
+    # Only fine-tune LoRA parameters
+    optimizer = torch.optim.AdamW(
+        filter(lambda p: p.requires_grad, model.parameters()),
         lr=ADAM_LR,
-        beta1=0.9,
-        beta2=0.999,
-        eps=1e-8,
         weight_decay=0.01,
     )
 
+    model.train()
     for epoch in range(NUM_EPOCHS):
-        logger.info(f"Epoch {epoch + 1}/{NUM_EPOCHS} — {len(datums)} datums …")
+        logger.info(f"Epoch {epoch + 1}/{NUM_EPOCHS} — {len(training_data)} steps …")
         total_loss = 0.0
 
-        for step, datum in enumerate(datums):
-            # Tinker operates on ~10-second clock cycles.
-            # Submit forward_backward, then immediately submit optim_step
-            # to overlap them within the same cycle.
-            fwd = training_client.forward_backward(datum, loss_fn="cross_entropy")
-            opt = training_client.optim_step(adam)
+        for step, batch in enumerate(training_data):
+            input_ids = batch["input_ids"].unsqueeze(0).to(model.device)   # [1, seq]
+            weights = batch["weights"].unsqueeze(0).to(model.device)        # [1, seq]
 
-            fwd_result = fwd.result()
-            opt.result()
+            outputs = model(input_ids=input_ids)
+            logits = outputs.logits                                          # [1, seq, vocab]
 
-            loss = fwd_result.loss if hasattr(fwd_result, "loss") else float("nan")
-            total_loss += loss if loss == loss else 0.0  # skip NaN
+            # Causal LM: predict token[t+1] from token[t]
+            shift_logits = logits[:, :-1, :].contiguous()                   # [1, seq-1, vocab]
+            shift_labels = input_ids[:, 1:].contiguous()                    # [1, seq-1]
+            shift_weights = weights[:, 1:].contiguous()                     # [1, seq-1]
+
+            # Per-token cross-entropy
+            token_losses = nn.CrossEntropyLoss(reduction="none")(
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1),
+            ).view(1, -1)                                                    # [1, seq-1]
+
+            # REINFORCE: weight losses by advantage
+            # Normalise by sum of |weights| to keep loss scale stable
+            denom = shift_weights.abs().sum() + 1e-8
+            loss = (token_losses * shift_weights).sum() / denom
+
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+
+            total_loss += loss.item()
 
             if (step + 1) % 5 == 0:
                 logger.info(
-                    f"  Epoch {epoch + 1} step {step + 1}/{len(datums)} "
+                    f"  Epoch {epoch + 1} step {step + 1}/{len(training_data)} "
                     f"avg_loss={total_loss / (step + 1):.4f}"
                 )
 
-        logger.info(f"Epoch {epoch + 1} done — avg_loss={total_loss / len(datums):.4f}")
+        logger.info(
+            f"Epoch {epoch + 1} done — avg_loss={total_loss / len(training_data):.4f}"
+        )
 
-    # Save checkpoint
-    checkpoint_name = f"airline_rl_e{NUM_EPOCHS}"
-    save_result = training_client.save_weights_for_sampler(checkpoint_name).result()
-    tuned_path: str = save_result.path
-    logger.info(f"Checkpoint saved → {tuned_path}")
-    return tuned_path
+    # Merge LoRA weights into base model and save
+    logger.info(f"Merging LoRA weights and saving to {output_dir} …")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    merged_model = model.merge_and_unload()
+    merged_model.save_pretrained(str(output_dir))
+    tokenizer.save_pretrained(str(output_dir))
+    logger.info(f"Model saved → {output_dir}")
+
+    if push_to_hub:
+        logger.info(f"Pushing to HuggingFace Hub → {push_to_hub} …")
+        merged_model.push_to_hub(push_to_hub)
+        tokenizer.push_to_hub(push_to_hub)
+        logger.info(f"Model available at: https://huggingface.co/{push_to_hub}")
+
+    return output_dir
 
 
 # ── Phase 3: Post-RL evaluation ────────────────────────────────────────────────
 
-def run_post_eval(tuned_model_path: str, out_file: Path) -> None:
+def run_post_eval(model_path: str, out_file: Path) -> None:
     """
     Evaluate the tuned model on the TEST split via tau2.
 
-    Uses Tinker's OpenAI-compatible endpoint so no code changes to tau2 are needed.
+    model_path can be:
+      - A local directory: ./output/tuned_model
+      - A HuggingFace Hub model ID: username/model-name
+
+    Uses litellm's huggingface/ provider so tau2 needs zero code changes.
     """
-    logger.info("Phase 3 — post-RL evaluation on test split …")
+    logger.info(f"Phase 3 — post-RL evaluation on test split (model={model_path}) …")
 
-    tinker_base_url = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
-    tinker_api_key = os.environ.get("TINKER_API_KEY", "")
-
-    # litellm supports custom OpenAI-compatible providers via the openai/ prefix
-    # and OPENAI_API_BASE / OPENAI_API_KEY env vars.
-    env = {
-        **os.environ,
-        "OPENAI_API_BASE": tinker_base_url,
-        "OPENAI_API_KEY": tinker_api_key,
-    }
-    agent_llm = f"openai/{tuned_model_path}"
+    # litellm routes huggingface/<model> to the transformers pipeline locally
+    # or to the HF Inference API if it's a Hub model ID.
+    agent_llm = f"huggingface/{model_path}"
 
     cmd = [
         sys.executable, "-m", "tau2", "run",
@@ -399,11 +434,11 @@ def run_post_eval(tuned_model_path: str, out_file: Path) -> None:
         "--task-set-name", TASK_SET,
         "--task-split-name", "test",
         "--agent-llm", agent_llm,
-        "--user-llm", USER_MODEL,   # keep user sim on Groq
+        "--user-llm", USER_MODEL,
         "--save-to", str(out_file),
     ]
-    logger.info(f"Running post-RL eval: {' '.join(cmd)}")
-    subprocess.run(cmd, env=env)
+    logger.info(f"Running: {' '.join(cmd)}")
+    subprocess.run(cmd)
     logger.info(f"Post-RL results saved → {out_file}")
 
 
@@ -451,7 +486,7 @@ def print_comparison(before_file: Path | None, after_file: Path | None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="RL fine-tuning experiment for airline_multistep via Tinker."
+        description="REINFORCE RL fine-tuning for airline_multistep via HuggingFace PEFT."
     )
     parser.add_argument(
         "--skip-rollouts", action="store_true",
@@ -459,65 +494,64 @@ def main() -> None:
     )
     parser.add_argument(
         "--trajectories-file", type=Path, default=None,
-        help="Path to a previously saved tau2 simulation JSON (used when --skip-rollouts).",
+        help="Path to a previously saved tau2 simulation JSON.",
     )
     parser.add_argument(
         "--skip-train", action="store_true",
-        help="Skip Phase 2 (RL training). Requires --tuned-model.",
+        help="Skip Phase 2 (RL training). Requires --model-output-dir.",
     )
     parser.add_argument(
-        "--tuned-model", type=str, default=None,
-        help="tinker:// path to a pre-trained checkpoint (used when --skip-train).",
+        "--model-output-dir", type=Path,
+        default=Path("output/airline_rl_tuned"),
+        help="Directory to save (or load) the tuned model. Default: output/airline_rl_tuned",
     )
     parser.add_argument(
         "--skip-eval", action="store_true",
         help="Skip Phase 3 (post-RL evaluation).",
     )
     parser.add_argument(
-        "--use-tinker-inference", action="store_true",
-        help=(
-            "Use Tinker's OpenAI-compatible endpoint for rollout collection "
-            "instead of Groq. Eliminates RPM/TPM rate limits. "
-            "Requires TINKER_API_KEY."
-        ),
+        "--push-to-hub", type=str, default=None,
+        help="HuggingFace Hub repo ID to push the tuned model to (e.g. username/model-name). "
+             "Requires HF_TOKEN env var.",
+    )
+    parser.add_argument(
+        "--no-quantize", action="store_true",
+        help="Disable 4-bit quantisation (use float16 instead). "
+             "Only needed if bitsandbytes is unavailable.",
     )
     args = parser.parse_args()
 
     ts = int(time.time())
-    rollout_file = args.trajectories_file or (SIM_DIR / f"airline_ms_train_rollouts_{ts}.json")
+    rollout_file = args.trajectories_file or (
+        SIM_DIR / f"airline_ms_train_rollouts_{ts}.json"
+    )
     post_eval_file = SIM_DIR / f"airline_ms_test_post_rl_{ts}.json"
 
-    # Shared training client (created once when --use-tinker-inference so that
-    # rollout collection and RL training reuse the same Tinker session / weights).
-    shared_training_client = None
-
-    # Phase 1
+    # Phase 1 — Rollout collection
     if not args.skip_rollouts:
-        rollout_agent_llm = ROLLOUT_MODEL
-        rollout_env: dict | None = None
-
-        if args.use_tinker_inference:
-            if not TINKER_OK:
-                parser.error("--use-tinker-inference requires the tinker package. pip install tinker")
-            shared_training_client = create_training_client()
-            rollout_agent_llm, rollout_env = create_tinker_inference_checkpoint(shared_training_client)
-            logger.info("Using Tinker inference for rollouts — no rate limits.")
-
-        collect_rollouts(rollout_file, agent_llm=rollout_agent_llm, env_overrides=rollout_env)
+        collect_rollouts(rollout_file)
     elif not rollout_file.exists():
         parser.error(f"--trajectories-file {rollout_file} does not exist.")
 
-    # Phase 2
-    tuned_model = args.tuned_model
+    # Phase 2 — RL training
     if not args.skip_train:
-        tuned_model = run_rl_training(rollout_file, training_client=shared_training_client)
-        logger.info(f"Tuned model checkpoint: {tuned_model}")
-    elif tuned_model is None:
-        parser.error("--skip-train requires --tuned-model <tinker://…>.")
+        run_rl_training(
+            trajectories_file=rollout_file,
+            output_dir=args.model_output_dir,
+            push_to_hub=args.push_to_hub,
+            quantize_4bit=not args.no_quantize,
+        )
+    elif not args.model_output_dir.exists():
+        parser.error(
+            f"--skip-train requires the model to already exist at "
+            f"--model-output-dir {args.model_output_dir}."
+        )
 
-    # Phase 3
+    # Phase 3 — Post-RL evaluation
     if not args.skip_eval:
-        run_post_eval(tuned_model, post_eval_file)
+        # Use Hub model ID if pushed, otherwise use local path
+        eval_model = args.push_to_hub or str(args.model_output_dir)
+        run_post_eval(eval_model, post_eval_file)
 
     # Summary
     print_comparison(rollout_file, post_eval_file if not args.skip_eval else None)

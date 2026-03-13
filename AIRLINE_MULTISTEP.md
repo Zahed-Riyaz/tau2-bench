@@ -196,48 +196,43 @@ All 34 tests should pass.
 
 ---
 
-## 11. RL Fine-Tuning with Tinker
+## 11. RL Fine-Tuning (HuggingFace PEFT — free, runs on Colab T4)
 
 The RL script targets the chain-following gaps in weaker models (wrong reservation IDs,
 skipped search steps, malformed tool calls). It runs three phases automatically:
 
 | Phase | What happens |
 |-------|-------------|
-| 1 — Rollout collection | Runs tau2 on the train split, saves trajectories |
-| 2 — RL training | REINFORCE with advantage-weighted cross-entropy, LoRA on Tinker |
+| 1 — Rollout collection | Runs tau2 on the train split via Groq, saves trajectories |
+| 2 — RL training | REINFORCE with advantage-weighted cross-entropy, LoRA via HuggingFace PEFT |
 | 3 — Post-RL eval | Evaluates tuned model on test split, prints before/after table |
 
-### Step 1 — Install Tinker
+No paid API required — training runs locally or on a free Google Colab T4 GPU.
+
+### Step 1 — Install dependencies
 
 ```bash
-pip install tinker
+pip install transformers peft accelerate torch bitsandbytes
 ```
 
 ### Step 2 — Set API keys
 
 ```bash
-export TINKER_API_KEY=<your-tinker-key>
-export GROQ_API_KEY=<your-groq-key>      # user simulator (free)
+export GROQ_API_KEY=<your-groq-key>      # rollout collection + user simulator
 # export ANTHROPIC_API_KEY=<key>         # optional: use Claude as user sim
 # export OPENAI_API_KEY=<key>            # optional: use GPT as user sim
+# export HF_TOKEN=<key>                  # only needed for --push-to-hub
 ```
 
-### Step 3 — Run the full pipeline (Groq for rollouts, Tinker for training)
+### Step 3 — Run the full pipeline
 
 ```bash
 python -m tau2.scripts.rl_airline_experiment
 ```
 
-### Step 4 — Run with Tinker inference for rollouts (no rate limits)
+Saves the tuned model to `output/airline_rl_tuned/` by default.
 
-Uses the same Tinker session for both rollout collection and RL training.
-Eliminates Groq's 300k TPM ceiling entirely.
-
-```bash
-python -m tau2.scripts.rl_airline_experiment --use-tinker-inference
-```
-
-### Step 5 — Skip rollout collection (use existing simulation file)
+### Step 4 — Skip rollout collection (reuse existing simulation file)
 
 If you already ran `tau2 run --save-to ...`, pass that file directly:
 
@@ -247,19 +242,34 @@ python -m tau2.scripts.rl_airline_experiment \
     --trajectories-file data/tau2/simulations/baseline.json
 ```
 
-### Step 6 — Skip training, only run post-RL evaluation
-
-If you already have a Tinker checkpoint:
+### Step 5 — Skip training, only run post-RL evaluation
 
 ```bash
 python -m tau2.scripts.rl_airline_experiment \
     --skip-rollouts \
     --skip-train \
-    --tuned-model tinker://<run-id>/sampler_weights/final \
+    --model-output-dir output/airline_rl_tuned \
     --trajectories-file data/tau2/simulations/baseline.json
 ```
 
-### Step 7 — Skip evaluation (train only, no post-RL run)
+### Step 6 — Push tuned model to HuggingFace Hub
+
+Useful for sharing or loading the model on another machine:
+
+```bash
+python -m tau2.scripts.rl_airline_experiment \
+    --push-to-hub <your-hf-username>/airline-rl-tuned
+```
+
+After pushing, post-RL eval automatically uses the Hub model ID.
+
+### Step 7 — Disable 4-bit quantisation (if bitsandbytes unavailable)
+
+```bash
+python -m tau2.scripts.rl_airline_experiment --no-quantize
+```
+
+### Step 8 — Skip evaluation (train only)
 
 ```bash
 python -m tau2.scripts.rl_airline_experiment --skip-eval
@@ -269,12 +279,13 @@ python -m tau2.scripts.rl_airline_experiment --skip-eval
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--use-tinker-inference` | off | Use Tinker's endpoint for rollout collection (no rate limits) |
 | `--skip-rollouts` | off | Skip Phase 1; requires `--trajectories-file` |
 | `--trajectories-file <path>` | auto-generated | Path to a saved tau2 simulation JSON |
-| `--skip-train` | off | Skip Phase 2; requires `--tuned-model` |
-| `--tuned-model <tinker://...>` | none | Pre-trained Tinker checkpoint path |
+| `--skip-train` | off | Skip Phase 2; requires `--model-output-dir` to exist |
+| `--model-output-dir <path>` | `output/airline_rl_tuned` | Where to save/load the tuned model |
 | `--skip-eval` | off | Skip Phase 3 post-RL evaluation |
+| `--push-to-hub <repo-id>` | off | Push tuned model to HuggingFace Hub after training |
+| `--no-quantize` | off | Use float16 instead of 4-bit (needs more VRAM) |
 
 ### Output
 
