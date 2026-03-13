@@ -75,16 +75,18 @@ MAX_SEQ_LEN    = 512      # truncate sequences to this length
 
 # ── Phase 0 & 1: Rollout collection ───────────────────────────────────────────
 
-def collect_rollouts(out_file: Path, split: str) -> None:
+def collect_rollouts(out_file: Path, split: str,
+                     rollout_model: str = ROLLOUT_MODEL,
+                     user_model: str = USER_MODEL) -> None:
     """Run tau2 on *split* and save the full conversation trajectories to *out_file*."""
-    logger.info(f"Collecting rollouts — split={split}, saving to {out_file.stem} …")
+    logger.info(f"Collecting rollouts — split={split}, agent={rollout_model} …")
     result = subprocess.run([
         "tau2", "run",
         "--domain",          DOMAIN,
         "--task-set-name",   TASK_SET,
         "--task-split-name", split,
-        "--agent-llm",       ROLLOUT_MODEL,
-        "--user-llm",        USER_MODEL,
+        "--agent-llm",       rollout_model,
+        "--user-llm",        user_model,
         "--save-to",         out_file.stem,  # tau2 appends .json automatically
     ])
     if result.returncode != 0:
@@ -335,7 +337,8 @@ def run_rl_training(
 
 # ── Phase 3: Post-RL evaluation ────────────────────────────────────────────────
 
-def run_post_eval(hub_model_id: str, out_file: Path) -> None:
+def run_post_eval(hub_model_id: str, out_file: Path,
+                  user_model: str = USER_MODEL) -> None:
     """
     Score the test split using the tuned model served from HuggingFace Hub.
     tau2 routes huggingface/<model-id> through litellm to the HF Inference API.
@@ -347,7 +350,7 @@ def run_post_eval(hub_model_id: str, out_file: Path) -> None:
         "--task-set-name",   TASK_SET,
         "--task-split-name", "test",
         "--agent-llm",       f"huggingface/{hub_model_id}",
-        "--user-llm",        USER_MODEL,
+        "--user-llm",        user_model,
         "--save-to",         out_file.stem,
     ])
 
@@ -415,6 +418,13 @@ def main() -> None:
                              "Required to run Phase 3 evaluation.")
     parser.add_argument("--no-quantize", action="store_true",
                         help="Use float16 instead of 4-bit quantisation.")
+    parser.add_argument("--rollout-model", type=str, default=ROLLOUT_MODEL,
+                        help="LiteLLM model string for rollout collection and baseline eval. "
+                             "Default: groq/llama-3.3-70b-versatile. "
+                             "Examples: claude-sonnet-4-6, gpt-4.1, groq/llama-3.3-70b-versatile")
+    parser.add_argument("--user-model", type=str, default=USER_MODEL,
+                        help="LiteLLM model string for the user simulator. "
+                             "Default: groq/llama-3.3-70b-versatile.")
     args = parser.parse_args()
 
     ts = int(time.time())
@@ -424,12 +434,14 @@ def main() -> None:
 
     # Phase 0 — baseline on test split (always runs unless --skip-rollouts)
     if not args.skip_rollouts:
-        logger.info("Phase 0 — baseline (test split, Groq) …")
-        collect_rollouts(baseline_file, split="test")
+        logger.info(f"Phase 0 — baseline (test split, {args.rollout_model}) …")
+        collect_rollouts(baseline_file, split="test",
+                         rollout_model=args.rollout_model, user_model=args.user_model)
 
         # Phase 1 — rollouts on train split
-        logger.info("Phase 1 — rollout collection (train split, Groq) …")
-        collect_rollouts(rollout_file, split="train")
+        logger.info(f"Phase 1 — rollout collection (train split, {args.rollout_model}) …")
+        collect_rollouts(rollout_file, split="train",
+                         rollout_model=args.rollout_model, user_model=args.user_model)
     else:
         if not rollout_file.exists():
             parser.error(f"--trajectories-file {rollout_file} does not exist.")
@@ -445,7 +457,7 @@ def main() -> None:
 
     # Phase 3 — post-RL evaluation (only if model was pushed to Hub)
     if args.push_to_hub:
-        run_post_eval(args.push_to_hub, post_eval_file)
+        run_post_eval(args.push_to_hub, post_eval_file, user_model=args.user_model)
     else:
         logger.info(
             "Phase 3 skipped — pass --push-to-hub <hf-user>/<repo> to evaluate "

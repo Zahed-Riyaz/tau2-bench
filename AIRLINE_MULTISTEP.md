@@ -223,14 +223,32 @@ pip install transformers peft accelerate torch bitsandbytes
 ### Step 2 — Set API keys
 
 ```bash
-export GROQ_API_KEY=<your-groq-key>   # rollout collection + user simulator
-export HF_TOKEN=<your-hf-token>       # required for --push-to-hub
+export GROQ_API_KEY=<your-groq-key>        # rollout collection + user simulator (free)
+export HF_TOKEN=<your-hf-token>            # required for --push-to-hub
+
+# Optional — only needed if using Claude or GPT as the rollout agent
+export ANTHROPIC_API_KEY=<your-claude-key> # --rollout-model claude-sonnet-4-6
+export OPENAI_API_KEY=<your-openai-key>    # --rollout-model gpt-4.1
 ```
 
 ### Step 3 — Run the full pipeline
 
 ```bash
-python -m tau2.scripts.rl_airline_experiment --push-to-hub <your-hf-username>/airline-rl-tuned
+# Groq (free, recommended)
+python -m tau2.scripts.rl_airline_experiment \
+    --push-to-hub <your-hf-username>/airline-rl-tuned
+
+# Anthropic Claude as rollout agent
+python -m tau2.scripts.rl_airline_experiment \
+    --rollout-model claude-sonnet-4-6 \
+    --user-model groq/llama-3.3-70b-versatile \
+    --push-to-hub <your-hf-username>/airline-rl-tuned
+
+# OpenAI GPT as rollout agent
+python -m tau2.scripts.rl_airline_experiment \
+    --rollout-model gpt-4.1 \
+    --user-model groq/llama-3.3-70b-versatile \
+    --push-to-hub <your-hf-username>/airline-rl-tuned
 ```
 
 This runs all four phases and prints the comparison table at the end.
@@ -262,6 +280,8 @@ python -m tau2.scripts.rl_airline_experiment --no-quantize --push-to-hub <repo>
 | `--model-output-dir <path>` | `output/airline_rl_tuned` | Where to save the tuned model |
 | `--push-to-hub <repo-id>` | off | Push tuned model to HF Hub and run Phase 3 eval |
 | `--no-quantize` | off | Use float16 instead of 4-bit (needs more VRAM) |
+| `--rollout-model <model>` | `groq/llama-3.3-70b-versatile` | LiteLLM model for rollout collection and baseline |
+| `--user-model <model>` | `groq/llama-3.3-70b-versatile` | LiteLLM model for the user simulator |
 
 ### Output
 
