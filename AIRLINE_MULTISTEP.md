@@ -105,13 +105,13 @@ tau2 run --domain airline --task-set-name airline_multistep --task-ids ms_a_0 --
 
 Task ID reference:
 
-| ID | Type | Dependency chain |
-|----|------|-----------------|
-| `ms_a_0` `ms_a_1` `ms_a_2` | A — Flight Status | user_id → reservation → flight_number → status |
-| `ms_b_0` `ms_b_1` `ms_b_2` | B — Compensation  | user_id → reservation → disrupted_flight → send_certificate |
-| `ms_c_0` `ms_c_1` `ms_c_2` | C — Search→Book   | search_flight → user_details → book_reservation |
-| `ms_d_0` `ms_d_1` `ms_d_2` | D — Upgrade       | reservation_details → search_flight → update_flights |
-| `ms_e_0` `ms_e_1` `ms_e_2` | E — Add Baggage   | user_details → reservation → update_baggages |
+| ID | Type | Tool call sequence |
+|----|------|--------------------|
+| `ms_a_0` `ms_a_1` `ms_a_2` | A — Flight Status | `get_user_details` → `get_reservation_details` → `get_flight_status` |
+| `ms_b_0` `ms_b_1` `ms_b_2` | B — Compensation  | `get_user_details` → `get_reservation_details` → `get_flight_status` → `send_certificate` |
+| `ms_c_0` `ms_c_1` `ms_c_2` | C — Search→Book   | `search_direct_flight` → `get_user_details` → `book_reservation` |
+| `ms_d_0` `ms_d_1` `ms_d_2` | D — Upgrade       | `get_reservation_details` → `search_direct_flight` → `update_reservation_flights` |
+| `ms_e_0` `ms_e_1` `ms_e_2` | E — Add Baggage   | `get_user_details` → `get_reservation_details` → `update_reservation_baggages` |
 
 ---
 
