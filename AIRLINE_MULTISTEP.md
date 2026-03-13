@@ -265,10 +265,29 @@ python -m tau2.scripts.rl_airline_experiment \
     --push-to-hub <your-hf-username>/airline-rl-tuned
 ```
 
-### Step 5 — Disable 4-bit quantisation (if bitsandbytes unavailable)
+### Step 5 — Disable 4-bit quantisation (required on Mac / CPU)
+
+4-bit quantisation requires a CUDA GPU with bitsandbytes. On Mac or any CPU-only
+machine, use `--no-quantize` which loads the model in **float32**:
 
 ```bash
 python -m tau2.scripts.rl_airline_experiment --no-quantize --push-to-hub <repo>
+```
+
+> **Why float32?** float16 and bfloat16 produce NaN gradients during the backward
+> pass on CPU. The script includes NaN guards that skip corrupted steps, but
+> float32 is the only dtype that trains stably without a GPU.
+
+### Step 6 — Reuse an existing baseline file (skip Phase 0)
+
+If you have already run a test-split baseline and want to skip re-running it:
+
+```bash
+python -m tau2.scripts.rl_airline_experiment \
+    --skip-rollouts \
+    --trajectories-file data/simulations/airline_ms_train_<ts>.json \
+    --baseline-file data/simulations/airline_ms_baseline_test_<ts>.json \
+    --push-to-hub <your-hf-username>/airline-rl-tuned
 ```
 
 ### All flags reference
@@ -276,12 +295,24 @@ python -m tau2.scripts.rl_airline_experiment --no-quantize --push-to-hub <repo>
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--skip-rollouts` | off | Skip Phases 0 & 1; requires `--trajectories-file` |
-| `--trajectories-file <path>` | auto-generated | Path to a saved tau2 simulation JSON |
+| `--trajectories-file <path>` | auto-generated | Path to a saved tau2 simulation JSON (train split) |
+| `--baseline-file <path>` | auto-generated | Path to an existing test-split baseline JSON; skips Phase 0 |
 | `--model-output-dir <path>` | `output/airline_rl_tuned` | Where to save the tuned model |
 | `--push-to-hub <repo-id>` | off | Push tuned model to HF Hub and run Phase 3 eval |
-| `--no-quantize` | off | Use float16 instead of 4-bit (needs more VRAM) |
+| `--no-quantize` | off | Use float32 instead of 4-bit quantisation (required on CPU/Mac) |
 | `--rollout-model <model>` | `groq/llama-3.3-70b-versatile` | LiteLLM model for rollout collection and baseline |
 | `--user-model <model>` | `groq/llama-3.3-70b-versatile` | LiteLLM model for the user simulator |
+
+### Key hyperparameters
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Base model | `Qwen/Qwen2.5-0.5B-Instruct` | Swap to `Qwen2.5-7B-Instruct` for real results |
+| LoRA rank | 16 | ~0.4% of parameters are trainable |
+| Learning rate | 1e-5 | Kept low for stable convergence; 3e-4 causes NaN on first step |
+| Reward baseline | 0.5 | Shifts `{0,1}` rewards to `{-0.5, +0.5}` advantages |
+| Epochs | 2 | |
+| Max sequence length | 512 tokens | Sequences truncated from the left (keeps recent context) |
 
 ### Output
 
@@ -292,9 +323,9 @@ The script prints a comparison table at the end:
 Task           Before          After
 ---------------------------------------------------------
 ms_a_2         0.0000    →     0.0000
-ms_b_2         0.0000    ↑     1.0000
-ms_c_2         0.0000    ↑     1.0000
-ms_d_2         0.0000    ↑     0.5000
+ms_b_0         0.0000    ↑     1.0000
+ms_c_0         0.0000    ↑     1.0000
+ms_d_0         0.0000    ↑     0.5000
 ms_e_2         0.0000    ↑     1.0000
 =========================================================
 AVERAGE        0.0000    ↑     0.7000
@@ -302,6 +333,21 @@ AVERAGE        0.0000    ↑     0.7000
 
 Without `--push-to-hub`, the After column shows `N/A` and only the Before
 baseline is printed.
+
+### Phase 3 limitation — HuggingFace Inference API
+
+The free HuggingFace Inference API only serves a curated set of popular models.
+A custom fine-tuned model pushed to Hub will return:
+
+```
+model_not_supported: The requested model is not supported by any provider you have enabled
+```
+
+To run Phase 3 you need one of:
+- **HF Inference Endpoints** (paid, dedicated) — deploy your model at
+  huggingface.co/inference-endpoints, then pass `--agent-llm-args` with the endpoint URL
+- **Together AI / Replicate** — deploy the model and point tau2 at the OpenAI-compatible API
+- A Colab T4 GPU running vllm to serve the model locally
 
 ---
 

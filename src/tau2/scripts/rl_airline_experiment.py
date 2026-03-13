@@ -67,7 +67,7 @@ USER_MODEL    = "groq/llama-3.3-70b-versatile"
 # RL hyper-parameters
 LORA_RANK      = 16       # number of LoRA low-rank dimensions
 LORA_ALPHA     = 32       # LoRA scaling factor
-ADAM_LR        = 3e-4
+ADAM_LR        = 1e-5
 NUM_EPOCHS     = 2
 REWARD_BASELINE = 0.5     # shift {0,1} reward → {-0.5, +0.5} advantage
 MAX_SEQ_LEN    = 512      # truncate sequences to this length
@@ -234,7 +234,7 @@ def setup_model(quantize_4bit: bool = True):
             bnb_4bit_quant_type="nf4",
         )
     else:
-        load_kwargs["torch_dtype"] = torch.float16
+        load_kwargs["torch_dtype"] = torch.float32
 
     model     = AutoModelForCausalLM.from_pretrained(BASE_MODEL, **load_kwargs)
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
@@ -294,6 +294,10 @@ def run_rl_training(
 
             logits = model(input_ids=input_ids).logits                     # [1, seq, vocab]
 
+            if torch.isnan(logits).any():
+                logger.warning(f"NaN in logits at step {step} — skipping")
+                continue
+
             # Shift: predict token[t+1] given tokens[0..t]
             shift_logits  = logits[:, :-1, :].contiguous()                 # [1, seq-1, vocab]
             shift_labels  = input_ids[:, 1:].contiguous()                  # [1, seq-1]
@@ -301,11 +305,15 @@ def run_rl_training(
 
             # Cross-entropy loss per token, then weight by advantage
             token_losses = nn.CrossEntropyLoss(reduction="none")(
-                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_logits.view(-1, shift_logits.size(-1)).float(),
                 shift_labels.view(-1),
             ).view(1, -1)                                                  # [1, seq-1]
 
             loss = (token_losses * shift_weights).sum() / (shift_weights.abs().sum() + 1e-8)
+
+            if torch.isnan(loss):
+                logger.warning(f"NaN loss at step {step} — logits range [{shift_logits.min():.2f}, {shift_logits.max():.2f}], weights sum {shift_weights.abs().sum():.4f} — skipping")
+                continue
 
             optimizer.zero_grad()
             loss.backward()
@@ -353,6 +361,11 @@ def run_post_eval(hub_model_id: str, out_file: Path,
         "--user-llm",        user_model,
         "--save-to",         out_file.stem,
     ])
+    # Move file from tau2's sim dir to our expected location
+    tau2_sim_dir = _REPO_ROOT / "data" / "tau2" / "simulations"
+    candidate = tau2_sim_dir / f"{out_file.stem}.json"
+    if candidate.exists() and candidate != out_file:
+        candidate.rename(out_file)
 
 
 # ── Comparison table ───────────────────────────────────────────────────────────
@@ -410,6 +423,9 @@ def main() -> None:
                         help="Skip Phases 0 & 1. Requires --trajectories-file.")
     parser.add_argument("--trajectories-file", type=Path, default=None,
                         help="Path to an existing tau2 simulation JSON (skips Phase 1).")
+    parser.add_argument("--baseline-file", type=Path, default=None,
+                        help="Path to an existing baseline test simulation JSON (skips Phase 0). "
+                             "Populates the Before column without re-running the baseline eval.")
     parser.add_argument("--model-output-dir", type=Path,
                         default=Path("output/airline_rl_tuned"),
                         help="Where to save the tuned model weights.")
@@ -417,7 +433,7 @@ def main() -> None:
                         help="HF Hub repo id (e.g. username/airline-rl). "
                              "Required to run Phase 3 evaluation.")
     parser.add_argument("--no-quantize", action="store_true",
-                        help="Use float16 instead of 4-bit quantisation.")
+                        help="Use float32 instead of 4-bit quantisation.")
     parser.add_argument("--rollout-model", type=str, default=ROLLOUT_MODEL,
                         help="LiteLLM model string for rollout collection and baseline eval. "
                              "Default: groq/llama-3.3-70b-versatile. "
@@ -428,15 +444,18 @@ def main() -> None:
     args = parser.parse_args()
 
     ts = int(time.time())
-    baseline_file  = SIM_DIR / f"airline_ms_baseline_test_{ts}.json"
+    baseline_file  = args.baseline_file or (SIM_DIR / f"airline_ms_baseline_test_{ts}.json")
     rollout_file   = args.trajectories_file or (SIM_DIR / f"airline_ms_train_{ts}.json")
     post_eval_file = SIM_DIR / f"airline_ms_post_eval_{ts}.json"
 
-    # Phase 0 — baseline on test split (always runs unless --skip-rollouts)
+    # Phase 0 — baseline on test split (always runs unless --skip-rollouts or --baseline-file given)
     if not args.skip_rollouts:
-        logger.info(f"Phase 0 — baseline (test split, {args.rollout_model}) …")
-        collect_rollouts(baseline_file, split="test",
-                         rollout_model=args.rollout_model, user_model=args.user_model)
+        if args.baseline_file:
+            logger.info(f"Phase 0 skipped — using existing baseline file: {args.baseline_file}")
+        else:
+            logger.info(f"Phase 0 — baseline (test split, {args.rollout_model}) …")
+            collect_rollouts(baseline_file, split="test",
+                             rollout_model=args.rollout_model, user_model=args.user_model)
 
         # Phase 1 — rollouts on train split
         logger.info(f"Phase 1 — rollout collection (train split, {args.rollout_model}) …")
@@ -465,7 +484,7 @@ def main() -> None:
         )
 
     print_comparison(
-        before_file=baseline_file if not args.skip_rollouts else None,
+        before_file=baseline_file if (not args.skip_rollouts or args.baseline_file) else None,
         after_file=post_eval_file if args.push_to_hub else None,
     )
     logger.info("Done.")
