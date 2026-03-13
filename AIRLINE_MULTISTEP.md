@@ -17,14 +17,10 @@ conda activate tau2
 pip install -e .
 ```
 
-### Step 2 — Install optional dependencies
+### Step 2 — Install optional dependencies (RL fine-tuning only)
 
 ```bash
-# Tinker (RL fine-tuning)
-pip install tinker
-
-# Verify the data files are present
-tau2 check-data
+pip install transformers peft accelerate torch bitsandbytes
 ```
 
 ---
@@ -38,7 +34,7 @@ Create a `.env` file at the repo root and add whichever keys you have:
 GROQ_API_KEY=gsk_...          # free tier, recommended for testing
 ANTHROPIC_API_KEY=sk-ant-...  # Claude models
 OPENAI_API_KEY=sk-...         # GPT models
-TINKER_API_KEY=...            # RL fine-tuning via Tinker
+HF_TOKEN=hf_...               # HuggingFace Hub (only needed for --push-to-hub)
 ```
 
 The `.env` file is loaded automatically when tau2 starts.
@@ -50,7 +46,7 @@ The `.env` file is loaded automatically when tau2 starts.
 | Run benchmark (recommended) | `GROQ_API_KEY` |
 | Use Claude as agent/user | `ANTHROPIC_API_KEY` |
 | Use GPT as agent/user | `OPENAI_API_KEY` |
-| RL fine-tuning | `TINKER_API_KEY` |
+| RL fine-tuning + Phase 3 eval | `GROQ_API_KEY` + `HF_TOKEN` |
 
 ---
 
@@ -72,6 +68,9 @@ Type D (Flight Update):             3 tasks
 Type E (Add Baggage):               3 tasks
 Total:                              15 tasks
 ```
+
+> **Note**: if you installed via pip (e.g. on Colab) rather than `pip install -e .`,
+> run this step after installation — the data files are not bundled with the package.
 
 ---
 
@@ -198,19 +197,22 @@ All 34 tests should pass.
 
 ## 11. RL Fine-Tuning (HuggingFace PEFT — free, runs on Colab T4)
 
-The RL script targets the chain-following gaps in weaker models (wrong reservation IDs,
-skipped search steps, malformed tool calls). It runs three phases automatically:
+The RL script teaches a small open model to follow multi-step tool chains by
+fine-tuning it on conversation trajectories collected from a stronger model (Groq).
 
 | Phase | What happens |
 |-------|-------------|
-| 1 — Rollout collection | Runs tau2 on the train split via Groq, saves trajectories |
+| 0 — Baseline | Scores the test split with Groq — the "Before" column |
+| 1 — Rollouts | Runs tau2 on the train split via Groq, saves full conversation transcripts |
 | 2 — RL training | REINFORCE with advantage-weighted cross-entropy, LoRA via HuggingFace PEFT |
-| 3 — Post-RL eval | Evaluates tuned model on test split, prints before/after table |
+| 3 — Post-RL eval | Pushes tuned model to HF Hub, scores test split, prints Before/After table |
 
-Training runs locally or on a free Google Colab T4 GPU.
-Base model: `Qwen/Qwen2.5-0.5B-Instruct` (~1 GB, open, no HF gate). Swap `BASE_MODEL` in the script for a larger model when you have more VRAM.
+Base model: `Qwen/Qwen2.5-0.5B-Instruct` (default, ~1 GB). Swap `BASE_MODEL` in
+the script to `Qwen/Qwen2.5-7B-Instruct` for real results on a T4 GPU.
 
-Phase 3 loads the tuned model weights directly from disk using `transformers` — no vllm, no external API, and no `--push-to-hub` required. The Groq user simulator still runs via API.
+Phase 3 requires `--push-to-hub` — the tuned model is pushed to HuggingFace Hub
+and then evaluated via tau2's standard LiteLLM routing. No vllm or local inference
+server needed.
 
 ### Step 1 — Install dependencies
 
@@ -221,19 +223,18 @@ pip install transformers peft accelerate torch bitsandbytes
 ### Step 2 — Set API keys
 
 ```bash
-export GROQ_API_KEY=<your-groq-key>      # rollout collection + user simulator
-# export ANTHROPIC_API_KEY=<key>         # optional: use Claude as user sim
-# export OPENAI_API_KEY=<key>            # optional: use GPT as user sim
-# export HF_TOKEN=<key>                  # only needed for --push-to-hub
+export GROQ_API_KEY=<your-groq-key>   # rollout collection + user simulator
+export HF_TOKEN=<your-hf-token>       # required for --push-to-hub
 ```
 
 ### Step 3 — Run the full pipeline
 
 ```bash
-python -m tau2.scripts.rl_airline_experiment
+python -m tau2.scripts.rl_airline_experiment --push-to-hub <your-hf-username>/airline-rl-tuned
 ```
 
-Saves the tuned model to `output/airline_rl_tuned/` by default.
+This runs all four phases and prints the comparison table at the end.
+Saves the tuned model to `output/airline_rl_tuned/` and pushes to HF Hub.
 
 ### Step 4 — Skip rollout collection (reuse existing simulation file)
 
@@ -242,92 +243,45 @@ If you already ran `tau2 run --save-to ...`, pass that file directly:
 ```bash
 python -m tau2.scripts.rl_airline_experiment \
     --skip-rollouts \
-    --trajectories-file data/tau2/simulations/baseline.json
-```
-
-### Step 5 — Skip training, only run post-RL evaluation
-
-```bash
-python -m tau2.scripts.rl_airline_experiment \
-    --skip-rollouts \
-    --skip-train \
-    --model-output-dir output/airline_rl_tuned \
-    --trajectories-file data/tau2/simulations/baseline.json
-```
-
-### Step 6 — Push tuned model to HuggingFace Hub
-
-Useful for sharing or loading the model on another machine:
-
-```bash
-python -m tau2.scripts.rl_airline_experiment \
+    --trajectories-file data/tau2/simulations/baseline.json \
     --push-to-hub <your-hf-username>/airline-rl-tuned
 ```
 
-After pushing, post-RL eval automatically uses the Hub model ID.
-
-### Step 7 — Disable 4-bit quantisation (if bitsandbytes unavailable)
+### Step 5 — Disable 4-bit quantisation (if bitsandbytes unavailable)
 
 ```bash
-python -m tau2.scripts.rl_airline_experiment --no-quantize
+python -m tau2.scripts.rl_airline_experiment --no-quantize --push-to-hub <repo>
 ```
-
-### Step 8 — Skip evaluation (train only)
-
-```bash
-python -m tau2.scripts.rl_airline_experiment --skip-eval
-```
-
-### Step 9 — Filter out failed trajectories (reward-weighted regression)
-
-Only train on successful episodes — useful when failures dominate the dataset and negative gradient is noisy:
-
-```bash
-python -m tau2.scripts.rl_airline_experiment --filter-failed
-```
-
-### Step 10 — Run multiple on-policy iterations
-
-After the first iteration the trained model generates its own rollouts, reducing the off-policy mismatch between the 70B rollout model and the 8B training model:
-
-```bash
-python -m tau2.scripts.rl_airline_experiment --rl-iterations 3
-```
-
-Each iteration saves a separate rollout file and model checkpoint (`…_iter0`, `…_iter1`, …).
 
 ### All flags reference
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--skip-rollouts` | off | Skip Phase 1; requires `--trajectories-file` |
+| `--skip-rollouts` | off | Skip Phases 0 & 1; requires `--trajectories-file` |
 | `--trajectories-file <path>` | auto-generated | Path to a saved tau2 simulation JSON |
-| `--skip-train` | off | Skip Phase 2; requires `--model-output-dir` to exist |
-| `--model-output-dir <path>` | `output/airline_rl_tuned` | Where to save/load the tuned model |
-| `--skip-eval` | off | Skip Phase 3 post-RL evaluation |
-| `--push-to-hub <repo-id>` | off | Push tuned model to HuggingFace Hub after training |
+| `--model-output-dir <path>` | `output/airline_rl_tuned` | Where to save the tuned model |
+| `--push-to-hub <repo-id>` | off | Push tuned model to HF Hub and run Phase 3 eval |
 | `--no-quantize` | off | Use float16 instead of 4-bit (needs more VRAM) |
-| `--filter-failed` | off | Skip reward=0 trajectories; trains only on successes |
-| `--rl-iterations <N>` | 1 | On-policy improvement loop; trained model generates rollouts from iteration 1 onward |
-| `--no-normalise` | off | Disable group-normalised advantages; fall back to fixed baseline=0.5 |
-| `--no-upweight` | off | Disable tool-call token upweighting (all response tokens weighted equally) |
 
 ### Output
 
 The script prints a comparison table at the end:
 
 ```
-=======================================================
-Task          Before (baseline)         After (RL)
--------------------------------------------------------
-ms_a_2               0.0000         →     0.0000
-ms_b_0               0.0000         ↑     1.0000
-ms_c_0               0.0000         ↑     1.0000
-ms_d_0               0.0000         ↑     0.5000
-ms_e_2               0.0000         ↑     1.0000
-=======================================================
-AVERAGE              0.0000         →     0.7000
+=========================================================
+Task           Before          After
+---------------------------------------------------------
+ms_a_2         0.0000    →     0.0000
+ms_b_2         0.0000    ↑     1.0000
+ms_c_2         0.0000    ↑     1.0000
+ms_d_2         0.0000    ↑     0.5000
+ms_e_2         0.0000    ↑     1.0000
+=========================================================
+AVERAGE        0.0000    ↑     0.7000
 ```
+
+Without `--push-to-hub`, the After column shows `N/A` and only the Before
+baseline is printed.
 
 ---
 
