@@ -213,7 +213,7 @@ Base model: `Qwen/Qwen2.5-0.5B-Instruct` (~1 GB, open, no HF gate). Swap `BASE_M
 > **Phase 3 post-eval limitation:** `huggingface/<model>` in litellm calls HF's Inference Providers API, which only serves models from approved providers (Groq, Together AI, etc.) — not arbitrary user-uploaded checkpoints. To run post-RL evaluation you need one of:
 > - A local GPU + `vllm` serving the checkpoint on port 8000 (set `OPENAI_API_BASE=http://localhost:8000/v1`)
 > - HF Inference Endpoints (dedicated deployment, paid)
-> - Google Colab with a GPU runtime (load the model via transformers pipeline directly)
+> - **Google Colab T4 GPU** — use the ready-made notebook at [`notebooks/colab_phase3_eval.ipynb`](notebooks/colab_phase3_eval.ipynb) (recommended, free)
 
 ### Step 1 — Install dependencies
 
