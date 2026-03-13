@@ -12,7 +12,8 @@ Pipeline
   Phase 1  Collect rollouts on the TRAIN split via tau2 run (Groq for speed).
   Phase 2  Load saved trajectories, compute REINFORCE advantages, LoRA-tune
            the agent locally using HuggingFace transformers + PEFT + PyTorch.
-  Phase 3  Evaluate the tuned model on the TEST split and compare rewards.
+  Phase 3  Evaluate the tuned model on the TEST split by loading it locally
+           with transformers — no vllm or external API required.
 
 Quick start (local GPU or Google Colab T4 — free)
 -----------
@@ -550,28 +551,200 @@ def run_rl_training(
 
 # ── Phase 3: Post-RL evaluation ────────────────────────────────────────────────
 
+if TRL_OK:
+    from tau2.agent.llm_agent import LLMAgent, LLMAgentState
+    from tau2.data_model.message import AssistantMessage, MultiToolMessage, ToolCall
+
+    class LocalHFAgent(LLMAgent):
+        """
+        Drop-in replacement for LLMAgent that calls a local HuggingFace model
+        instead of going through litellm.  Used for Phase 3 post-RL evaluation
+        so no external API or vllm server is needed.
+        """
+
+        def __init__(self, hf_model, tokenizer, tools, domain_policy):
+            super().__init__(tools=tools, domain_policy=domain_policy, llm="local")
+            self._hf_model = hf_model
+            self._hf_tokenizer = tokenizer
+
+        def generate_next_message(
+            self, message, state: LLMAgentState
+        ) -> tuple[AssistantMessage, LLMAgentState]:
+            if isinstance(message, MultiToolMessage):
+                state.messages.extend(message.tool_messages)
+            else:
+                state.messages.append(message)
+            messages = state.system_messages + state.messages
+            assistant_message = _local_hf_generate(
+                self._hf_model, self._hf_tokenizer, messages, self.tools
+            )
+            state.messages.append(assistant_message)
+            return assistant_message, state
+
+
+def _parse_local_tool_calls(text: str) -> list:
+    """
+    Parse tool calls from Qwen2.5's <tool_call>...</tool_call> output format.
+    Returns a list of ToolCall objects (empty list if none found).
+    """
+    import re
+    import uuid
+
+    calls = []
+    for m in re.finditer(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", text, re.DOTALL):
+        try:
+            data = json.loads(m.group(1))
+            calls.append(
+                ToolCall(
+                    id=f"call_{uuid.uuid4().hex[:8]}",
+                    name=data["name"],
+                    arguments=data.get("arguments", {}),
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse tool call: {e}")
+    return calls
+
+
+def _local_hf_generate(hf_model, tokenizer, messages, tools) -> "AssistantMessage":
+    """
+    Run one forward pass on the local HF model and return an AssistantMessage.
+    Formats input with apply_chat_template (supports tool schemas for Qwen2.5),
+    generates greedily, then parses any <tool_call> blocks in the output.
+    """
+    from tau2.utils.llm_utils import to_litellm_messages
+
+    tools_schema = [t.openai_schema for t in tools] if tools else None
+    oai_msgs = to_litellm_messages(messages)
+
+    input_text = tokenizer.apply_chat_template(
+        oai_msgs,
+        tools=tools_schema,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    inputs = tokenizer(input_text, return_tensors="pt").to(hf_model.device)
+
+    with torch.no_grad():
+        output_ids = hf_model.generate(
+            inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            max_new_tokens=512,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+    new_tokens = output_ids[0][inputs["input_ids"].shape[1]:]
+    response_text = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+
+    tool_calls = _parse_local_tool_calls(response_text) or None
+    # When the model makes tool calls the content should be None; otherwise it's text.
+    content = None if tool_calls else response_text
+
+    return AssistantMessage(role="assistant", content=content, tool_calls=tool_calls)
+
+
+def run_post_eval_local(model_dir: Path, out_file: Path) -> None:
+    """
+    Evaluate the locally saved tuned model on the TEST split.
+
+    Loads model weights from *model_dir* with transformers, plugs them into a
+    LocalHFAgent, and runs tau2's orchestrator + evaluator directly — no vllm,
+    no external API required.  Results are saved to *out_file*.
+    """
+    if not TRL_OK:
+        raise ImportError(
+            "transformers/peft/torch not installed.\n"
+            "Run: pip install transformers peft accelerate torch"
+        )
+
+    from tau2.evaluator.evaluator import EvaluationType, evaluate_simulation
+    from tau2.orchestrator.orchestrator import Orchestrator
+    from tau2.registry import registry
+    from tau2.run import load_tasks
+
+    logger.info(f"Phase 3 — post-RL evaluation (local model at {model_dir}) …")
+
+    tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
+    hf_model = AutoModelForCausalLM.from_pretrained(
+        str(model_dir),
+        device_map="auto",
+        dtype=torch.float16,
+    )
+    hf_model.eval()
+    logger.info("Model loaded.")
+
+    tasks = load_tasks(TASK_SET, task_split_name="test")
+    env_constructor = registry.get_env_constructor(DOMAIN)
+    UserConstructor = registry.get_user_constructor("user_simulator")
+
+    results = []
+    for task in tasks:
+        logger.info(f"  Evaluating task {task.id} …")
+        try:
+            environment = env_constructor()
+            agent = LocalHFAgent(
+                hf_model=hf_model,
+                tokenizer=tokenizer,
+                tools=environment.get_tools(),
+                domain_policy=environment.get_policy(),
+            )
+            try:
+                user_tools = environment.get_user_tools()
+            except Exception:
+                user_tools = None
+            user = UserConstructor(
+                tools=user_tools,
+                instructions=str(task.user_scenario),
+                llm=USER_MODEL,
+                llm_args={},
+            )
+            orchestrator = Orchestrator(
+                domain=DOMAIN,
+                agent=agent,
+                user=user,
+                environment=environment,
+                task=task,
+                max_steps=100,
+                max_errors=10,
+                seed=42,
+            )
+            simulation = orchestrator.run()
+            reward_info = evaluate_simulation(
+                domain=DOMAIN,
+                task=task,
+                simulation=simulation,
+                evaluation_type=EvaluationType.ALL,
+            )
+            reward = reward_info.reward
+        except Exception as e:
+            logger.error(f"Task {task.id} failed: {e}")
+            reward = 0.0
+
+        results.append({"task_id": task.id, "reward": reward})
+        logger.info(f"  Task {task.id}: reward={reward:.4f}")
+
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    out_file.write_text(json.dumps({"simulations": results}, indent=2))
+    logger.info(f"Post-RL results saved → {out_file}")
+
+
 def run_post_eval(model_path: str, out_file: Path) -> None:
     """
-    Evaluate the tuned model on the TEST split via tau2.
+    Evaluate the tuned model on the TEST split.
 
-    model_path can be:
-      - A HuggingFace Hub model ID: username/model-name  (requires HF_TOKEN)
+    If *model_path* is a local directory (the default after Phase 2), runs
+    evaluation directly using the local HF model — no vllm or external API needed.
 
-    NOTE: litellm's huggingface/ provider calls the HF Inference API — it does NOT
-    load a local checkpoint directory. Post-eval requires either:
-      a) --push-to-hub  (model uploaded to HF Hub, served via Inference API), or
-      b) a separate local inference server (vLLM, text-generation-inference).
-    If model_path looks like a local directory, this function skips and logs a warning.
+    If *model_path* is a HuggingFace Hub repo ID (set via --push-to-hub), falls
+    back to calling the HF Inference Providers API via litellm.
     """
     if Path(model_path).exists() and Path(model_path).is_dir():
-        logger.warning(
-            f"Phase 3 skipped — '{model_path}' is a local directory. "
-            "litellm's huggingface/ provider requires a Hub model ID, not a local path. "
-            "Re-run with --push-to-hub <username/repo> to enable post-RL evaluation."
-        )
+        run_post_eval_local(Path(model_path), out_file)
         return
 
-    logger.info(f"Phase 3 — post-RL evaluation on test split (model={model_path}) …")
+    # Hub model ID path — requires HF_TOKEN and an approved provider
+    logger.info(f"Phase 3 — post-RL evaluation on test split (Hub model={model_path}) …")
     agent_llm = f"huggingface/{model_path}"
 
     cmd = [
@@ -598,10 +771,20 @@ def print_comparison(before_file: Path | None, after_file: Path | None) -> None:
             return {}
         with open(path) as f:
             data = json.load(f)
-        return {
-            sim["task_id"]: sim.get("reward", float("nan"))
-            for sim in data.get("simulations", [])
-        }
+        result = {}
+        for sim in data.get("simulations", []):
+            tid = sim.get("task_id")
+            if tid is None:
+                continue
+            # Flat format (local eval): {"task_id": ..., "reward": ...}
+            if "reward" in sim:
+                result[tid] = float(sim["reward"])
+            # Nested format (tau2 CLI Results): reward_info.reward
+            elif sim.get("reward_info"):
+                result[tid] = float(sim["reward_info"].get("reward", float("nan")))
+            else:
+                result[tid] = float("nan")
+        return result
 
     before = _load(before_file)
     after = _load(after_file)
