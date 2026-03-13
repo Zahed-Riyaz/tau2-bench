@@ -207,8 +207,13 @@ skipped search steps, malformed tool calls). It runs three phases automatically:
 | 2 — RL training | REINFORCE with advantage-weighted cross-entropy, LoRA via HuggingFace PEFT |
 | 3 — Post-RL eval | Evaluates tuned model on test split, prints before/after table |
 
-No paid API required — training runs locally or on a free Google Colab T4 GPU.
-Base model: `Qwen/Qwen2.5-7B-Instruct` (open, no HuggingFace access gate required). To use Llama instead, run `huggingface-cli login` and set `BASE_MODEL` in the script.
+Training runs locally or on a free Google Colab T4 GPU.
+Base model: `Qwen/Qwen2.5-0.5B-Instruct` (~1 GB, open, no HF gate). Swap `BASE_MODEL` in the script for a larger model when you have more VRAM.
+
+> **Phase 3 post-eval limitation:** `huggingface/<model>` in litellm calls HF's Inference Providers API, which only serves models from approved providers (Groq, Together AI, etc.) — not arbitrary user-uploaded checkpoints. To run post-RL evaluation you need one of:
+> - A local GPU + `vllm` serving the checkpoint on port 8000 (set `OPENAI_API_BASE=http://localhost:8000/v1`)
+> - HF Inference Endpoints (dedicated deployment, paid)
+> - Google Colab with a GPU runtime (load the model via transformers pipeline directly)
 
 ### Step 1 — Install dependencies
 
