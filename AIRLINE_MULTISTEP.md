@@ -208,6 +208,7 @@ skipped search steps, malformed tool calls). It runs three phases automatically:
 | 3 — Post-RL eval | Evaluates tuned model on test split, prints before/after table |
 
 No paid API required — training runs locally or on a free Google Colab T4 GPU.
+Base model: `Qwen/Qwen2.5-7B-Instruct` (open, no HuggingFace access gate required). To use Llama instead, run `huggingface-cli login` and set `BASE_MODEL` in the script.
 
 ### Step 1 — Install dependencies
 
@@ -275,6 +276,24 @@ python -m tau2.scripts.rl_airline_experiment --no-quantize
 python -m tau2.scripts.rl_airline_experiment --skip-eval
 ```
 
+### Step 9 — Filter out failed trajectories (reward-weighted regression)
+
+Only train on successful episodes — useful when failures dominate the dataset and negative gradient is noisy:
+
+```bash
+python -m tau2.scripts.rl_airline_experiment --filter-failed
+```
+
+### Step 10 — Run multiple on-policy iterations
+
+After the first iteration the trained model generates its own rollouts, reducing the off-policy mismatch between the 70B rollout model and the 8B training model:
+
+```bash
+python -m tau2.scripts.rl_airline_experiment --rl-iterations 3
+```
+
+Each iteration saves a separate rollout file and model checkpoint (`…_iter0`, `…_iter1`, …).
+
 ### All flags reference
 
 | Flag | Default | Description |
@@ -286,6 +305,10 @@ python -m tau2.scripts.rl_airline_experiment --skip-eval
 | `--skip-eval` | off | Skip Phase 3 post-RL evaluation |
 | `--push-to-hub <repo-id>` | off | Push tuned model to HuggingFace Hub after training |
 | `--no-quantize` | off | Use float16 instead of 4-bit (needs more VRAM) |
+| `--filter-failed` | off | Skip reward=0 trajectories; trains only on successes |
+| `--rl-iterations <N>` | 1 | On-policy improvement loop; trained model generates rollouts from iteration 1 onward |
+| `--no-normalise` | off | Disable group-normalised advantages; fall back to fixed baseline=0.5 |
+| `--no-upweight` | off | Disable tool-call token upweighting (all response tokens weighted equally) |
 
 ### Output
 

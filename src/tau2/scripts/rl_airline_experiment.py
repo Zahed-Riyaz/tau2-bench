@@ -20,6 +20,10 @@ Quick start (local GPU or Google Colab T4 — free)
     export GROQ_API_KEY=<key>
     python -m tau2.scripts.rl_airline_experiment
 
+    Base model: Qwen/Qwen2.5-7B-Instruct (open, no HF access gate required).
+    To use Llama instead: huggingface-cli login, request access at
+    https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct, then set BASE_MODEL.
+
 Skip rollout collection if you already have a simulation file:
     python -m tau2.scripts.rl_airline_experiment \\
         --skip-rollouts \\
@@ -65,17 +69,21 @@ except ImportError:
     )
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-DATA_DIR = _REPO_ROOT / "data" / "tau2"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+DATA_DIR = _REPO_ROOT / "data"          # matches tau2's own DATA_DIR (repo_root/data)
 SIM_DIR = DATA_DIR / "simulations"
 SIM_DIR.mkdir(parents=True, exist_ok=True)
 
 DOMAIN = "airline"
 TASK_SET = "airline_multistep"
 
-# Base model — small enough to fine-tune on a free Colab T4 (16 GB VRAM)
-# with 4-bit quantisation + LoRA.
-BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+# Base model options (all open, no HF access gate):
+#   Qwen/Qwen2.5-0.5B-Instruct  ~1 GB  — proof-of-pipeline, minimal download
+#   Qwen/Qwen2.5-3B-Instruct    ~6 GB  — better quality, still fits on T4
+#   Qwen/Qwen2.5-7B-Instruct   ~14 GB  — recommended for real fine-tuning
+# For Llama: request access at https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct
+# then run `huggingface-cli login` and set BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+BASE_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"   # ~1 GB download, no HF gate
 
 # Rollout collection — Groq is fast and free.
 ROLLOUT_MODEL = "groq/llama-3.3-70b-versatile"
@@ -87,29 +95,44 @@ LORA_ALPHA = 32
 ADAM_LR = 3e-4
 NUM_EPOCHS = 2
 REWARD_BASELINE = 0.5   # shift {0,1} reward → {-0.5, +0.5} advantage
-MAX_SEQ_LEN = 2048      # truncate long conversations to fit in VRAM
+MAX_SEQ_LEN = 512       # 2048 on GPU; 512 keeps each CPU step under ~5s for demo runs
 
 
 # ── Phase 1: Rollout collection ────────────────────────────────────────────────
 
-def collect_rollouts(out_file: Path, agent_llm: str = ROLLOUT_MODEL) -> Path:
-    """Run tau2 on the TRAIN split and save trajectories to *out_file*."""
-    logger.info(f"Phase 1 — collecting rollouts with agent={agent_llm} …")
+def collect_rollouts(out_file: Path, agent_llm: str = ROLLOUT_MODEL, split: str = "train") -> Path:
+    """Run tau2 on *split* and save trajectories to *out_file*."""
+    logger.info(f"Phase 1 — collecting rollouts (split={split}) with agent={agent_llm} …")
     cmd = [
-        sys.executable, "-m", "tau2", "run",
+        "tau2", "run",
         "--domain", DOMAIN,
         "--task-set-name", TASK_SET,
-        "--task-split-name", "train",
+        "--task-split-name", split,
         "--agent-llm", agent_llm,
         "--user-llm", USER_MODEL,
-        "--save-to", str(out_file),
+        # tau2 CLI prepends DATA_DIR/simulations/ and appends .json automatically,
+        # so we pass only the stem (filename without extension).
+        "--save-to", out_file.stem,
     ]
     logger.info(f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd)
     if result.returncode != 0:
         logger.warning("tau2 run exited with non-zero status — some tasks may have failed.")
-    logger.info(f"Trajectories saved → {out_file}")
-    return out_file
+    expected_file = SIM_DIR / f"{out_file.stem}.json"
+
+    if not expected_file.exists():
+        # fallback: check alternative tau2 path
+        alt = _REPO_ROOT / "data" / "simulations" / f"{out_file.stem}.json"
+        if alt.exists():
+            expected_file = alt
+        else:
+            raise FileNotFoundError(
+                f"Rollout file not found in expected locations:\n"
+                f"{expected_file}\n{alt}"
+            )
+
+    logger.info(f"Trajectories saved → {expected_file}")
+    return expected_file
 
 
 # ── Phase 2: RL fine-tuning ────────────────────────────────────────────────────
@@ -181,20 +204,77 @@ def _encode_turn(
     return ctx_tokens, resp_tokens
 
 
+MIN_REWARD_THRESHOLD = 0.0  # filter_failed: skip trajectories with reward <= this
+TOOL_CALL_UPWEIGHT = 3.0    # multiply advantage for tokens inside a tool-call JSON block
+
+
+def _upweight_tool_tokens(
+    resp_tokens: list[int],
+    tokenizer,
+    base_advantage: float,
+    upweight: float = TOOL_CALL_UPWEIGHT,
+) -> list[float]:
+    """
+    Return per-token advantage weights for a single assistant response.
+
+    Tokens that fall inside a JSON tool-call block (between the first '{' and
+    matching '}') receive advantage * upweight; all other response tokens receive
+    the base advantage. This improves credit assignment: the tool name and
+    argument values are the decisions that actually affect task success, while
+    surrounding natural language is noise for the reward signal.
+    """
+    import re
+    resp_str = tokenizer.decode(resp_tokens, skip_special_tokens=False)
+
+    # Find byte offsets of all {...} spans that look like tool-call JSON
+    tool_spans: list[tuple[int, int]] = []
+    for m in re.finditer(r"\{[^{}]*\}", resp_str):
+        tool_spans.append((m.start(), m.end()))
+
+    weights: list[float] = []
+    char_pos = 0
+    for tok_id in resp_tokens:
+        tok_str = tokenizer.decode([tok_id], skip_special_tokens=False)
+        tok_end = char_pos + len(tok_str)
+        in_tool = any(s <= char_pos < e for s, e in tool_spans)
+        weights.append(base_advantage * (upweight if in_tool else 1.0))
+        char_pos = tok_end
+
+    return weights
+
+
 def build_training_tensors(
     simulation_results: list[dict],
     tokenizer,
     baseline: float = REWARD_BASELINE,
     max_len: int = MAX_SEQ_LEN,
+    filter_failed: bool = False,
+    normalise_advantages: bool = True,
+    upweight_tool_calls: bool = True,
 ) -> list[dict]:
     """
     Convert tau2 SimulationRun dicts → PyTorch training tensors.
 
-    Strategy (REINFORCE with constant baseline):
-      advantage = reward - baseline
+    Strategy (REINFORCE with group-normalised advantage):
+      advantage = (reward - mean(rewards)) / (std(rewards) + 1e-8)
       Each assistant turn in the episode gets the same advantage as a
       per-token weight. Positive advantage → reinforce those tokens.
       Negative advantage → suppress them.
+
+    normalise_advantages: if True, use group normalisation (GRPO-style) instead
+      of a fixed baseline. Keeps advantage scale stable regardless of the
+      reward distribution in the current batch — critical when most rewards are
+      0 (constant baseline=0.5 would assign large negative advantage to every
+      token in every failed episode, overwhelming the few positive signals).
+
+    upweight_tool_calls: if True, multiply the advantage for tokens inside JSON
+      tool-call blocks by TOOL_CALL_UPWEIGHT. The tool name and argument values
+      are the decisions that actually determine task success; upweighting them
+      improves credit assignment without changing the loss function structure.
+
+    filter_failed: if True, skip trajectories with reward <= MIN_REWARD_THRESHOLD.
+      Converts REINFORCE into reward-weighted regression — only successful episodes
+      contribute gradient. Reduces noise when failed episodes dominate the dataset.
 
     Returns a list of dicts with keys:
       input_ids  — LongTensor [seq_len]
@@ -202,9 +282,43 @@ def build_training_tensors(
     """
     training_data = []
 
+    # ── Group-normalised advantage (GRPO-style) ───────────────────────────────
+    rewards = [sim.get("reward", 0.0) for sim in simulation_results]
+    import statistics
+    r_mean = statistics.mean(rewards) if rewards else 0.0
+    r_std = statistics.stdev(rewards) if len(rewards) > 1 else 0.0
+
+    # Fall back to fixed baseline when std ≈ 0 (all rewards identical, e.g. all-zero
+    # baseline run). Normalising by near-zero std would collapse every advantage to 0
+    # and produce zero training tensors. Fixed baseline still gives a valid gradient:
+    # with all rewards=0 and baseline=0.5, advantage=-0.5 suppresses every action taken.
+    use_normalise = normalise_advantages and r_std > 1e-6
+    if use_normalise:
+        logger.info(
+            f"Advantage normalisation (GRPO): mean={r_mean:.3f} std={r_std:.3f} "
+            f"across {len(rewards)} trajectories."
+        )
+        def compute_advantage(r: float) -> float:
+            return (r - r_mean) / r_std
+    else:
+        if normalise_advantages and r_std <= 1e-6:
+            logger.warning(
+                f"All rewards identical ({r_mean:.3f}) — std≈0, "
+                f"falling back to fixed baseline={baseline}."
+            )
+        def compute_advantage(r: float) -> float:
+            return r - baseline
+
+    skipped_failed = 0
     for sim in simulation_results:
         reward: float = sim.get("reward", 0.0)
-        advantage = reward - baseline
+
+        if filter_failed and reward <= MIN_REWARD_THRESHOLD:
+            skipped_failed += 1
+            logger.debug(f"Task {sim.get('task_id')}: reward={reward:.2f} filtered out.")
+            continue
+
+        advantage = compute_advantage(reward)
         messages_raw: list[dict] = sim.get("messages", [])
 
         if not messages_raw:
@@ -236,7 +350,13 @@ def build_training_tensors(
                 continue
 
             all_tokens = ctx_tokens + resp_tokens
-            weights = [0.0] * len(ctx_tokens) + [advantage] * len(resp_tokens)
+
+            # ── Per-token weights ─────────────────────────────────────────────
+            if upweight_tool_calls:
+                resp_weights = _upweight_tool_tokens(resp_tokens, tokenizer, advantage)
+            else:
+                resp_weights = [advantage] * len(resp_tokens)
+            weights = [0.0] * len(ctx_tokens) + resp_weights
 
             # Truncate to max_len from the right to keep recent context
             if len(all_tokens) > max_len:
@@ -255,7 +375,8 @@ def build_training_tensors(
 
     logger.info(
         f"Built {len(training_data)} training tensors "
-        f"from {len(simulation_results)} trajectories."
+        f"from {len(simulation_results)} trajectories"
+        + (f" ({skipped_failed} failed filtered out)." if filter_failed else ".")
     )
     return training_data
 
@@ -313,6 +434,10 @@ def run_rl_training(
     output_dir: Path,
     push_to_hub: str | None = None,
     quantize_4bit: bool = True,
+    filter_failed: bool = False,
+    normalise_advantages: bool = True,
+    upweight_tool_calls: bool = True,
+    max_steps: int | None = None,
 ) -> Path:
     """
     REINFORCE fine-tune BASE_MODEL on the collected trajectories.
@@ -333,7 +458,12 @@ def run_rl_training(
     logger.info(f"Loaded {len(simulations)} simulation runs.")
 
     model, tokenizer = setup_model(quantize_4bit=quantize_4bit)
-    training_data = build_training_tensors(simulations, tokenizer)
+    training_data = build_training_tensors(
+        simulations, tokenizer,
+        filter_failed=filter_failed,
+        normalise_advantages=normalise_advantages,
+        upweight_tool_calls=upweight_tool_calls,
+    )
 
     if not training_data:
         raise ValueError(
@@ -348,12 +478,20 @@ def run_rl_training(
         weight_decay=0.01,
     )
 
+    steps_per_epoch = (
+        min(max_steps, len(training_data)) if max_steps else len(training_data)
+    )
+    if max_steps and max_steps < len(training_data):
+        logger.info(
+            f"--max-steps {max_steps}: capping each epoch at {max_steps}/{len(training_data)} steps."
+        )
+
     model.train()
     for epoch in range(NUM_EPOCHS):
-        logger.info(f"Epoch {epoch + 1}/{NUM_EPOCHS} — {len(training_data)} steps …")
+        logger.info(f"Epoch {epoch + 1}/{NUM_EPOCHS} — {steps_per_epoch} steps …")
         total_loss = 0.0
 
-        for step, batch in enumerate(training_data):
+        for step, batch in enumerate(training_data[:steps_per_epoch]):
             input_ids = batch["input_ids"].unsqueeze(0).to(model.device)   # [1, seq]
             weights = batch["weights"].unsqueeze(0).to(model.device)        # [1, seq]
 
@@ -390,7 +528,7 @@ def run_rl_training(
                 )
 
         logger.info(
-            f"Epoch {epoch + 1} done — avg_loss={total_loss / len(training_data):.4f}"
+            f"Epoch {epoch + 1} done — avg_loss={total_loss / steps_per_epoch:.4f}"
         )
 
     # Merge LoRA weights into base model and save
@@ -417,25 +555,33 @@ def run_post_eval(model_path: str, out_file: Path) -> None:
     Evaluate the tuned model on the TEST split via tau2.
 
     model_path can be:
-      - A local directory: ./output/tuned_model
-      - A HuggingFace Hub model ID: username/model-name
+      - A HuggingFace Hub model ID: username/model-name  (requires HF_TOKEN)
 
-    Uses litellm's huggingface/ provider so tau2 needs zero code changes.
+    NOTE: litellm's huggingface/ provider calls the HF Inference API — it does NOT
+    load a local checkpoint directory. Post-eval requires either:
+      a) --push-to-hub  (model uploaded to HF Hub, served via Inference API), or
+      b) a separate local inference server (vLLM, text-generation-inference).
+    If model_path looks like a local directory, this function skips and logs a warning.
     """
-    logger.info(f"Phase 3 — post-RL evaluation on test split (model={model_path}) …")
+    if Path(model_path).exists() and Path(model_path).is_dir():
+        logger.warning(
+            f"Phase 3 skipped — '{model_path}' is a local directory. "
+            "litellm's huggingface/ provider requires a Hub model ID, not a local path. "
+            "Re-run with --push-to-hub <username/repo> to enable post-RL evaluation."
+        )
+        return
 
-    # litellm routes huggingface/<model> to the transformers pipeline locally
-    # or to the HF Inference API if it's a Hub model ID.
+    logger.info(f"Phase 3 — post-RL evaluation on test split (model={model_path}) …")
     agent_llm = f"huggingface/{model_path}"
 
     cmd = [
-        sys.executable, "-m", "tau2", "run",
+        "tau2", "run",
         "--domain", DOMAIN,
         "--task-set-name", TASK_SET,
         "--task-split-name", "test",
         "--agent-llm", agent_llm,
         "--user-llm", USER_MODEL,
-        "--save-to", str(out_file),
+        "--save-to", out_file.stem,
     ]
     logger.info(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd)
@@ -465,20 +611,24 @@ def print_comparison(before_file: Path | None, after_file: Path | None) -> None:
     print(f"{'Task':<12}  {'Before (baseline)':>18}  {'After (RL)':>12}")
     print("-" * 55)
     for tid in all_ids:
-        b = before.get(tid, float("nan"))
-        a = after.get(tid, float("nan"))
+        b = before.get(tid)
+        a = after.get(tid)
+        b_str = f"{b:.4f}" if b is not None else "N/A"
+        a_str = f"{a:.4f}" if a is not None else "N/A (run --push-to-hub to enable)"
         arrow = "→"
-        if a > b:
-            arrow = "↑"
-        elif a < b:
-            arrow = "↓"
-        print(f"{tid:<12}  {b:>18.4f}  {arrow} {a:>10.4f}")
+        if b is not None and a is not None:
+            arrow = "↑" if a > b else ("↓" if a < b else "→")
+        print(f"{tid:<12}  {b_str:>18}  {arrow} {a_str}")
     print("=" * 55)
 
-    if before and after:
+    if before:
         avg_b = sum(before.values()) / len(before)
-        avg_a = sum(after.values()) / len(after)
-        print(f"{'AVERAGE':<12}  {avg_b:>18.4f}  → {avg_a:>10.4f}")
+        avg_b_str = f"{avg_b:.4f}"
+        if after:
+            avg_a = sum(after.values()) / len(after)
+            print(f"{'AVERAGE':<12}  {avg_b_str:>18}  → {avg_a:.4f}")
+        else:
+            print(f"{'AVERAGE':<12}  {avg_b_str:>18}  → N/A")
     print()
 
 
@@ -519,33 +669,101 @@ def main() -> None:
         help="Disable 4-bit quantisation (use float16 instead). "
              "Only needed if bitsandbytes is unavailable.",
     )
+    parser.add_argument(
+        "--filter-failed", action="store_true",
+        help="Skip reward=0 trajectories during training (reward-weighted regression). "
+             "Useful when failed episodes dominate the dataset.",
+    )
+    parser.add_argument(
+        "--rl-iterations", type=int, default=1,
+        help="Number of on-policy RL iterations. After the first iteration the trained "
+             "model generates rollouts for the next iteration. Default: 1.",
+    )
+    parser.add_argument(
+        "--max-steps", type=int, default=None,
+        help="Cap each epoch at this many gradient steps. "
+             "Use for quick demo runs on CPU (e.g. --max-steps 10).",
+    )
+    parser.add_argument(
+        "--no-normalise", action="store_true",
+        help="Disable group-normalised advantages (GRPO-style). "
+             "Falls back to fixed baseline=0.5. Use if batch size is too small for stable stats.",
+    )
+    parser.add_argument(
+        "--no-upweight", action="store_true",
+        help="Disable tool-call token upweighting. "
+             "All response tokens get equal advantage weight.",
+    )
     args = parser.parse_args()
 
     ts = int(time.time())
     rollout_file = args.trajectories_file or (
         SIM_DIR / f"airline_ms_train_rollouts_{ts}.json"
     )
+    baseline_file = SIM_DIR / f"airline_ms_test_baseline_{ts}.json"
     post_eval_file = SIM_DIR / f"airline_ms_test_post_rl_{ts}.json"
 
-    # Phase 1 — Rollout collection
+    # Phase 0 — Collect test-split baseline with the rollout model (Groq).
+    # This gives the "Before" column in the comparison table using the SAME
+    # test tasks that post-eval will score. Skipped when --skip-rollouts is set
+    # (assume the user already has a baseline or is in a quick-demo mode).
     if not args.skip_rollouts:
-        collect_rollouts(rollout_file)
-    elif not rollout_file.exists():
-        parser.error(f"--trajectories-file {rollout_file} does not exist.")
+        logger.info("Phase 0 — collecting test-split baseline (Groq) for comparison table …")
+        collect_rollouts(baseline_file, agent_llm=ROLLOUT_MODEL, split="test")
+    else:
+        logger.info("Phase 0 skipped (--skip-rollouts). Before column will show N/A.")
 
-    # Phase 2 — RL training
-    if not args.skip_train:
-        run_rl_training(
-            trajectories_file=rollout_file,
-            output_dir=args.model_output_dir,
-            push_to_hub=args.push_to_hub,
-            quantize_4bit=not args.no_quantize,
+    # ── On-policy iteration loop ──────────────────────────────────────────────
+    # Iteration 0: rollout agent = ROLLOUT_MODEL (external model)
+    # Iteration k>0: rollout agent = trained model from previous iteration
+    # This converts offline REINFORCE into an on-policy improvement loop.
+
+    for iteration in range(args.rl_iterations):
+        is_first = (iteration == 0)
+        iter_rollout_file = (
+            rollout_file if is_first
+            else SIM_DIR / f"airline_ms_train_iter{iteration}_{ts}.json"
         )
-    elif not args.model_output_dir.exists():
-        parser.error(
-            f"--skip-train requires the model to already exist at "
-            f"--model-output-dir {args.model_output_dir}."
+        iter_model_dir = (
+            args.model_output_dir if args.rl_iterations == 1
+            else args.model_output_dir.parent / f"{args.model_output_dir.name}_iter{iteration}"
         )
+
+        if iteration > 0:
+            logger.info(
+                f"On-policy iteration {iteration}/{args.rl_iterations - 1} — "
+                f"collecting rollouts with trained model …"
+            )
+
+        # Phase 1 — Rollout collection
+        if not args.skip_rollouts or not is_first:
+            rollout_agent = (
+                ROLLOUT_MODEL if is_first
+                else f"huggingface/{args.model_output_dir}"
+            )
+            collect_rollouts(iter_rollout_file, agent_llm=rollout_agent)
+        elif not iter_rollout_file.exists():
+            parser.error(f"--trajectories-file {iter_rollout_file} does not exist.")
+
+        # Phase 2 — RL training
+        if not args.skip_train:
+            run_rl_training(
+                trajectories_file=iter_rollout_file,
+                output_dir=iter_model_dir,
+                push_to_hub=args.push_to_hub if iteration == args.rl_iterations - 1 else None,
+                quantize_4bit=not args.no_quantize,
+                filter_failed=args.filter_failed,
+                normalise_advantages=not args.no_normalise,
+                upweight_tool_calls=not args.no_upweight,
+                max_steps=args.max_steps,
+            )
+            # Point subsequent iterations at the freshly trained model
+            args.model_output_dir = iter_model_dir
+        elif not iter_model_dir.exists():
+            parser.error(
+                f"--skip-train requires the model to already exist at "
+                f"--model-output-dir {iter_model_dir}."
+            )
 
     # Phase 3 — Post-RL evaluation
     if not args.skip_eval:
@@ -553,8 +771,9 @@ def main() -> None:
         eval_model = args.push_to_hub or str(args.model_output_dir)
         run_post_eval(eval_model, post_eval_file)
 
-    # Summary
-    print_comparison(rollout_file, post_eval_file if not args.skip_eval else None)
+    # Summary — compare test-split baseline vs post-RL test results
+    before_file = baseline_file if baseline_file.exists() else None
+    print_comparison(before_file, post_eval_file if not args.skip_eval else None)
     logger.info("Done.")
 
 
