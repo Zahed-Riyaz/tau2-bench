@@ -60,9 +60,20 @@ TASK_SET      = "airline_multistep"
 # Swap to Qwen/Qwen2.5-7B-Instruct for real results (needs a GPU with ~14 GB VRAM).
 BASE_MODEL    = "Qwen/Qwen2.5-0.5B-Instruct"
 
-# Groq is used for rollout collection and the user simulator (fast, free).
+# Model for rollout collection (Phase 0 & 1) and the user simulator.
+# Uncomment the provider you have API keys for:
+
+# -- Groq (requires GROQ_API_KEY) -------------------------------------------
 ROLLOUT_MODEL = "groq/llama-3.3-70b-versatile"
 USER_MODEL    = "groq/llama-3.3-70b-versatile"
+
+# -- OpenAI (requires OPENAI_API_KEY) ----------------------------------------
+# ROLLOUT_MODEL = "gpt-4.1-mini"
+# USER_MODEL    = "gpt-4.1-mini"
+
+# -- Anthropic (requires ANTHROPIC_API_KEY) -----------------------------------
+# ROLLOUT_MODEL = "claude-haiku-4-5-20251001"
+# USER_MODEL    = "claude-haiku-4-5-20251001"
 
 # RL hyper-parameters
 LORA_RANK      = 16       # number of LoRA low-rank dimensions

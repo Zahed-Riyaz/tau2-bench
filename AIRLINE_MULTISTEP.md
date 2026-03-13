@@ -31,7 +31,7 @@ Create a `.env` file at the repo root and add whichever keys you have:
 
 ```bash
 # .env
-GROQ_API_KEY=gsk_...          # free tier, recommended for testing
+GROQ_API_KEY=gsk_...          # for Groq models
 ANTHROPIC_API_KEY=sk-ant-...  # Claude models
 OPENAI_API_KEY=sk-...         # GPT models
 HF_TOKEN=hf_...               # HuggingFace Hub (only needed for --push-to-hub)
@@ -43,10 +43,10 @@ The `.env` file is loaded automatically when tau2 starts.
 
 | Goal | Key needed |
 |------|-----------|
-| Run benchmark (recommended) | `GROQ_API_KEY` |
-| Use Claude as agent/user | `ANTHROPIC_API_KEY` |
-| Use GPT as agent/user | `OPENAI_API_KEY` |
-| RL fine-tuning + Phase 3 eval | `GROQ_API_KEY` + `HF_TOKEN` |
+| Run benchmark with Groq | `GROQ_API_KEY` |
+| Run benchmark with Claude | `ANTHROPIC_API_KEY` |
+| Run benchmark with GPT | `OPENAI_API_KEY` |
+| RL fine-tuning + Phase 3 eval | any of the above + `HF_TOKEN` |
 
 ---
 
@@ -93,7 +93,7 @@ At the prompts:
 ## 5. Run a Single Task (automated)
 
 ```bash
-# Groq (recommended — fast, free)
+# Groq
 tau2 run --domain airline --task-set-name airline_multistep --task-ids ms_a_0 --agent-llm groq/llama-3.3-70b-versatile --user-llm groq/llama-3.3-70b-versatile
 
 # Claude
@@ -141,7 +141,7 @@ tau2 run --domain airline --task-set-name airline_multistep --task-split-name ba
 LiteLLM is used under the hood, so any model string it supports works:
 
 ```bash
-# Groq — free, fast, no download (recommended)
+# Groq
 --agent-llm groq/llama-3.3-70b-versatile
 
 # Anthropic Claude
@@ -223,7 +223,7 @@ pip install transformers peft accelerate torch bitsandbytes
 ### Step 2 — Set API keys
 
 ```bash
-export GROQ_API_KEY=<your-groq-key>        # rollout collection + user simulator (free)
+export GROQ_API_KEY=<your-groq-key>        # rollout collection + user simulator
 export HF_TOKEN=<your-hf-token>            # required for --push-to-hub
 
 # Optional — only needed if using Claude or GPT as the rollout agent
@@ -234,7 +234,7 @@ export OPENAI_API_KEY=<your-openai-key>    # --rollout-model gpt-4.1
 ### Step 3 — Run the full pipeline
 
 ```bash
-# Groq (free, recommended)
+# Groq
 python -m tau2.scripts.rl_airline_experiment \
     --push-to-hub <your-hf-username>/airline-rl-tuned
 
@@ -314,26 +314,6 @@ python -m tau2.scripts.rl_airline_experiment \
 | Epochs | 2 | |
 | Max sequence length | 512 tokens | Sequences truncated from the left (keeps recent context) |
 
-### Output
-
-The script prints a comparison table at the end:
-
-```
-=========================================================
-Task           Before          After
----------------------------------------------------------
-ms_a_2         0.0000    →     0.0000
-ms_b_0         0.0000    ↑     1.0000
-ms_c_0         0.0000    ↑     1.0000
-ms_d_0         0.0000    ↑     0.5000
-ms_e_2         0.0000    ↑     1.0000
-=========================================================
-AVERAGE        0.0000    ↑     0.7000
-```
-
-Without `--push-to-hub`, the After column shows `N/A` and only the Before
-baseline is printed.
-
 ### Phase 3 limitation — HuggingFace Inference API
 
 The free HuggingFace Inference API only serves a curated set of popular models.
@@ -351,50 +331,3 @@ To run Phase 3 you need one of:
 
 ---
 
-## 12. Programmatic Usage
-
-```python
-from tau2.registry import registry
-from tau2.run import run_task
-
-# Load a single task
-tasks = registry.get_tasks_loader("airline_multistep")("base")
-task = next(t for t in tasks if t.id == "ms_b_0")
-
-# Run it
-sim = run_task(
-    domain="airline",
-    task=task,
-    agent="llm_agent",
-    user="user_simulator",
-    llm_agent="groq/llama-3.3-70b-versatile",
-    llm_user="groq/llama-3.3-70b-versatile",
-    max_steps=200,
-    seed=42,
-)
-
-print(sim.reward)
-for msg in sim.messages:
-    print(f"[{msg.role}] {msg.content}")
-```
-
----
-
-## Task Design — Why Intermediate IDs Matter
-
-Every task tells the user simulator what it **does not know**
-(`unknown_info` field). The user cannot volunteer a `reservation_id`
-or `flight_number` it was never given. An agent that hallucinates any
-intermediate ID will either get a tool error or produce an argument
-mismatch against the ground-truth `actions` list — both resulting in
-a failed evaluation.
-
-The reward basis per type:
-
-| Type | `reward_basis` | What is checked |
-|------|---------------|-----------------|
-| A    | ACTION + COMMUNICATE | Correct tool chain **and** status reported to user |
-| B    | ACTION | All 4 tool calls with correct args (especially `send_certificate.amount`) |
-| C    | ACTION | `book_reservation.flights` flight_number must match search output |
-| D    | ACTION | `update_reservation_flights` must use route/date from reservation |
-| E    | ACTION | Baggage update args correct |
